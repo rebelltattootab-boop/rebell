@@ -18,132 +18,107 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
 
   const rateBCV = typeof rate === 'number' && rate > 0 ? rate : 794.99
 
-  // Helper para detectar anulaciones
+  // Helper para verificar estado activo / anulado
   const isVoided = (item: any): boolean => {
     return Boolean(
-      item.voided === true ||
-      item.isVoided === true ||
-      item.anulado === true ||
-      item.anulada === true ||
-      item.voidedAt ||
-      item.anuladoAt ||
-      item.voidReason ||
+      item.status === 'void' ||
       item.status === 'voided' ||
       item.status === 'cancelled' ||
       item.status === 'anulada' ||
-      item.status === 'anulado'
+      item.status === 'anulado' ||
+      item.voided === true ||
+      item.anulado === true
     )
   }
 
-  // Parseo universal de fechas para Firestore
-  const getItemDate = (item: any): Date => {
+  // Parseo universal de fecha a timestamp en milisegundos
+  const getMillis = (item: any): number => {
     const raw = item?.createdAt ?? item?.timestamp ?? item?.date ?? item?.fecha
-    if (!raw) return new Date()
-    if (typeof raw?.toDate === 'function') return raw.toDate()
-    if (typeof raw?.toMillis === 'function') return new Date(raw.toMillis())
-    if (typeof raw === 'number') return new Date(raw)
-    if (raw?.seconds) return new Date(raw.seconds * 1000)
-    const parsed = new Date(raw)
-    return isNaN(parsed.getTime()) ? new Date() : parsed
+    if (typeof raw === 'number') return raw
+    if (typeof raw?.toMillis === 'function') return raw.toMillis()
+    if (typeof raw?.toDate === 'function') return raw.toDate().getTime()
+    if (raw?.seconds) return raw.seconds * 1000
+    const parsed = new Date(raw).getTime()
+    return isNaN(parsed) ? Date.now() : parsed
   }
 
-  // Filtrar ventas por período
-  const filteredSales = useMemo(() => {
+  // Límites temporales
+  const timeLimits = useMemo(() => {
     const now = new Date()
-    const todayStr = now.toDateString()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const startOfWeek = startOfToday - 7 * 24 * 60 * 60 * 1000
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+    return { startOfToday, startOfWeek, startOfMonth }
+  }, [])
 
+  // Filtrar ventas activas
+  const filteredSales = useMemo(() => {
     return (sales || []).filter((s: any) => {
       if (isVoided(s)) return false
       if (period === 'all') return true
 
-      const saleDate = getItemDate(s)
-      if (period === 'today') return saleDate.toDateString() === todayStr
-      if (period === 'week') {
-        const weekAgo = new Date(now)
-        weekAgo.setDate(now.getDate() - 7)
-        return saleDate >= weekAgo
-      }
-      if (period === 'month') {
-        return saleDate.getMonth() === now.getMonth() && saleDate.getFullYear() === now.getFullYear()
-      }
+      const ms = getMillis(s)
+      if (period === 'today') return ms >= timeLimits.startOfToday
+      if (period === 'week') return ms >= timeLimits.startOfWeek
+      if (period === 'month') return ms >= timeLimits.startOfMonth
       return true
     })
-  }, [sales, period])
+  }, [sales, period, timeLimits])
 
-  // Filtrar gastos por período
+  // Filtrar gastos
   const filteredExpenses = useMemo(() => {
-    const now = new Date()
-    const todayStr = now.toDateString()
-
     return (expenses || []).filter((e: any) => {
       if (isVoided(e)) return false
       if (period === 'all') return true
 
-      const expDate = getItemDate(e)
-      if (period === 'today') return expDate.toDateString() === todayStr
-      if (period === 'week') {
-        const weekAgo = new Date(now)
-        weekAgo.setDate(now.getDate() - 7)
-        return expDate >= weekAgo
-      }
-      if (period === 'month') {
-        return expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear()
-      }
+      const ms = getMillis(e)
+      if (period === 'today') return ms >= timeLimits.startOfToday
+      if (period === 'week') return ms >= timeLimits.startOfWeek
+      if (period === 'month') return ms >= timeLimits.startOfMonth
       return true
     })
-  }, [expenses, period])
+  }, [expenses, period, timeLimits])
 
-  // Métricas financieras calculadas
+  // Cálculos consolidados
   const metrics = useMemo(() => {
     let totalSalesUSD = 0
     let cashUSD = 0
     let bsTotal = 0
     let digitalUSD = 0
 
+    // 1. Procesar Ventas
     filteredSales.forEach((s: any) => {
-      let saleTotalUSD = Number(s.totalUSD ?? s.total ?? s.subtotal ?? 0)
-      
-      if (!saleTotalUSD && Array.isArray(s.items)) {
-        saleTotalUSD = s.items.reduce((acc: number, it: any) => {
-          return acc + (Number(it.unitPrice || it.price || 0) * Number(it.quantity || 1))
-        }, 0)
-      }
-      totalSalesUSD += saleTotalUSD
+      const saleUSD = Number(s.totalUsd ?? s.totalUSD ?? s.total ?? 0)
+      totalSalesUSD += saleUSD
 
-      const p = s.payments || s.payment || {}
-      const efUSD = Number(p.efectivoUsd ?? s.efectivoUsd ?? 0)
-      const pMovil = Number(p.pagoMovil ?? s.pagoMovil ?? 0)
-      const transf = Number(p.transferencia ?? s.transferencia ?? 0)
-      const zelleUSD = Number(p.zelle ?? s.zelle ?? 0)
-      const binanceUSD = Number(p.binance ?? s.binance ?? 0)
+      const p = s.payments || {}
+      const efUSD = Number(p.efectivoUsd ?? 0)
+      const pMovil = Number(p.pagoMovil ?? 0)
+      const transf = Number(p.transferencia ?? 0)
+      const zelleUSD = Number(p.zelle ?? 0)
+      const binanceUSD = Number(p.binance ?? 0)
 
-      const hasExplicitPayments = (efUSD + pMovil + transf + zelleUSD + binanceUSD) > 0
+      const hasPaymentsObj = (efUSD + pMovil + transf + zelleUSD + binanceUSD) > 0
 
-      if (hasExplicitPayments) {
+      if (hasPaymentsObj) {
         cashUSD += efUSD
         bsTotal += (pMovil + transf)
         digitalUSD += (zelleUSD + binanceUSD)
       } else {
-        const method = String(s.paymentMethod || s.method || '').toLowerCase()
-        if (method.includes('bs') || method.includes('pago') || method.includes('movil') || method.includes('transf')) {
-          bsTotal += Number(s.totalBS ?? s.montoBS ?? (saleTotalUSD * rateBCV))
-        } else if (method.includes('binance') || method.includes('zelle') || method.includes('usdt')) {
-          digitalUSD += saleTotalUSD
-        } else {
-          cashUSD += saleTotalUSD
-        }
+        cashUSD += saleUSD
       }
     })
 
-    // Sumar Gastos
+    // 2. Procesar Gastos
     let totalExpensesUSD = 0
     filteredExpenses.forEach((e: any) => {
-      const expUSD = Number(e.amount ?? e.amountUSD ?? e.monto ?? e.totalUSD ?? e.total ?? 0)
+      const expUSD = Number(e.amountUsd ?? e.amountUSD ?? e.amount ?? 0)
+      const expBS = Number(e.amountBs ?? e.amountBS ?? (expUSD * (e.rate || rateBCV)))
+      
       totalExpensesUSD += expUSD
 
-      const method = String(e.method || e.paymentMethod || e.metodo || '').toLowerCase()
-      if (method.includes('bs') || method.includes('pago') || method.includes('movil') || method.includes('punto') || method.includes('transf')) {
-        const expBS = Number(e.amountBS ?? e.montoBS ?? (expUSD * rateBCV))
+      const method = String(e.method || e.paymentMethod || '').toLowerCase()
+      if (method.includes('pago') || method.includes('bs') || method.includes('punto') || method.includes('transf')) {
         bsTotal -= expBS
       } else if (method.includes('binance') || method.includes('zelle') || method.includes('usdt')) {
         digitalUSD -= expUSD
@@ -152,8 +127,9 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       }
     })
 
+    // 3. Valor de Inventario
     const totalInventoryValue = (products || []).reduce((acc: number, p: any) => {
-      const unitCost = landedCost ? landedCost(p) : Number(p.costPrice ?? p.cost ?? p.price ?? 0)
+      const unitCost = landedCost ? landedCost(p) : Number(p.costPrice ?? p.cost ?? 0)
       const stock = Number(p.stock ?? 0)
       return acc + (unitCost * stock)
     }, 0)
@@ -166,11 +142,11 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       totalSalesUSD,
       totalExpensesUSD,
       gananciaNeta,
-      cashUSD,
-      bsTotal,
-      digitalUSD,
-      totalDisponibleUSD,
-      totalDisponibleBs,
+      cashUSD: Math.max(0, cashUSD),
+      bsTotal: Math.max(0, bsTotal),
+      digitalUSD: Math.max(0, digitalUSD),
+      totalDisponibleUSD: Math.max(0, totalDisponibleUSD),
+      totalDisponibleBs: Math.max(0, totalDisponibleBs),
       totalInventoryValue,
       salesCount: filteredSales.length
     }
@@ -231,7 +207,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
           </span>
         </div>
 
-        {/* Desglose real por métodos */}
+        {/* Desglose real por método */}
         <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border/40 pt-3 text-[11px]">
           <div>
             <p className="text-[10px] text-muted-foreground">Efectivo $</p>
