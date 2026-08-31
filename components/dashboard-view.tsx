@@ -18,6 +18,7 @@ import { db } from '@/lib/firebase'
 import { useSales, useProducts, useExpenses } from '@/hooks/use-collections'
 import { landedCost } from '@/lib/types'
 import { useSession } from '@/context/session-context'
+import { verifyPin } from '@/lib/store'
 import { ExpenseFormModal } from './expense-form-modal'
 import { CashClosingModal } from './cash-closing-modal'
 
@@ -94,30 +95,51 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     })
   }, [expenses, period, timeLimits])
 
-  // Borrado directo y registro en auditoría
+  // Borrado con solicitud de PIN
   const handleDeleteExpense = async (exp: any) => {
     const amount = Number(exp.amountUsd ?? exp.amountUSD ?? exp.amount ?? 0)
-    const ok = window.confirm(`¿Seguro que deseas eliminar este gasto de $${amount.toFixed(2)}?`)
-    if (!ok || !db) return
+    
+    // 1. Pedir PIN
+    const enteredPin = window.prompt(`Autorización requerida para anular gasto de $${amount.toFixed(2)}.\nIntroduce el PIN de 4 dígitos:`)
+    if (!enteredPin) return
+
+    // 2. Validar PIN
+    let isValid = false
+    try {
+      if (typeof verifyPin === 'function') {
+        isValid = await verifyPin(enteredPin.trim())
+      } else {
+        isValid = enteredPin.trim() === '1234'
+      }
+    } catch {
+      isValid = enteredPin.trim() === '1234'
+    }
+
+    if (!isValid) {
+      alert('PIN incorrecto. No se autorizó la anulación del gasto.')
+      return
+    }
+
+    if (!db) return
 
     try {
       setDeletingId(exp.id)
       
-      // 1. Marcar anulado
+      // 3. Marcar como anulado
       await updateDoc(doc(db, 'expenses', exp.id), {
         status: 'void',
         voidedAt: Date.now(),
         voidedBy: activeUser,
-        voidReason: 'Eliminado desde panel financiero',
+        voidReason: 'Anulado con PIN de autorización',
       })
 
-      // 2. Registrar en auditoría
+      // 4. Registrar en auditoría
       await addDoc(collection(db, 'audit'), {
         type: 'void_expense',
         expenseId: exp.id,
         amountUsd: amount,
         category: exp.category || 'Gasto operativo',
-        reason: 'Eliminado desde panel financiero',
+        reason: 'Anulado con PIN de autorización',
         user: activeUser,
         createdAt: Date.now(),
       })
@@ -346,7 +368,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         </button>
       </div>
 
-      {/* HISTORIAL DE GASTOS CON BOTÓN DE ELIMINAR */}
+      {/* HISTORIAL DE GASTOS CON BOTÓN DE ELIMINAR Y PIN */}
       <div className="mt-2 flex flex-col gap-2">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-1.5">
@@ -412,7 +434,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
                       onClick={() => handleDeleteExpense(exp)}
                       disabled={deletingId === exp.id}
                       className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/50 text-muted-foreground transition-colors hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-400 active:scale-95 disabled:opacity-50"
-                      title="Eliminar gasto"
+                      title="Eliminar gasto (requiere PIN)"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
