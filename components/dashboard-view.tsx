@@ -1,14 +1,13 @@
 'use client'
 
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { 
   Wallet, 
   TrendingUp, 
   TrendingDown, 
   DollarSign, 
   Package, 
-  PlusCircle, 
-  History, 
+  Plus, 
   Trash2, 
   Calendar,
   ReceiptText,
@@ -22,13 +21,11 @@ import { landedCost } from '@/lib/types'
 import { useSession } from '@/context/session-context'
 import { verifyPin } from '@/lib/store'
 import { ExpenseFormModal } from './expense-form-modal'
-import { CashClosingModal } from './cash-closing-modal'
 
 export function DashboardView({ rate = 794.99 }: { rate?: number }) {
   const { activeUser } = useSession()
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('today')
   const [showExpenseModal, setShowExpenseModal] = useState(false)
-  const [showClosingModal, setShowClosingModal] = useState(false)
   
   // Estado para el modal de PIN nativo
   const [expenseToVoid, setExpenseToVoid] = useState<any | null>(null)
@@ -298,7 +295,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         ))}
       </div>
 
-      {/* TARJETA DESTACADA: DINERO DISPONIBLE */}
+      {/* TARJETA DESTACADA: DINERO DISPONIBLE + BOTÓN DE REGISTRAR GASTO PROMINENTE */}
       <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/30 via-card to-card p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -309,9 +306,15 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
               Saldo Actual Disponible
             </span>
           </div>
-          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
-            Caja Activa
-          </span>
+
+          {/* BOTÓN REGISTRAR GASTO DESTACADO ARRIBA */}
+          <button
+            onClick={() => setShowExpenseModal(true)}
+            className="flex items-center gap-1.5 rounded-full border border-rose-500/40 bg-rose-500/15 px-3 py-1 text-xs font-bold text-rose-400 shadow-sm transition-all hover:bg-rose-500/25 active:scale-95"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Registrar Gasto
+          </button>
         </div>
 
         <div className="mt-3 flex flex-col">
@@ -355,10 +358,17 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
           </div>
         </div>
 
-        <div className="flex flex-col justify-between rounded-xl border border-border/60 bg-card p-3">
-          <div className="flex items-center gap-1.5 text-rose-400">
-            <TrendingDown className="h-4 w-4" />
-            <span className="text-xs font-medium text-muted-foreground">Gastos Operativos</span>
+        {/* Tarjeta de Gastos con opción rápida al hacer click */}
+        <div 
+          onClick={() => setShowExpenseModal(true)}
+          className="flex cursor-pointer flex-col justify-between rounded-xl border border-border/60 bg-card p-3 transition-colors hover:border-rose-500/40"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-rose-400">
+              <TrendingDown className="h-4 w-4" />
+              <span className="text-xs font-medium text-muted-foreground">Gastos Operativos</span>
+            </div>
+            <span className="text-[10px] font-bold text-rose-400/80">+ Agregar</span>
           </div>
           <div className="mt-2">
             <p className="text-lg font-bold text-rose-400">${metrics.totalExpensesUSD.toFixed(2)}</p>
@@ -399,33 +409,22 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         </div>
       </div>
 
-      {/* BOTONES DE ACCIÓN */}
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          onClick={() => setShowExpenseModal(true)}
-          className="flex items-center justify-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 py-2.5 px-3 text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/20 active:scale-[0.98]"
-        >
-          <PlusCircle className="h-4 w-4" />
-          Registrar Gasto
-        </button>
-
-        <button
-          onClick={() => setShowClosingModal(true)}
-          className="flex items-center justify-center gap-2 rounded-xl border border-border/60 bg-secondary/60 py-2.5 px-3 text-xs font-semibold text-foreground transition-colors hover:bg-secondary active:scale-[0.98]"
-        >
-          <History className="h-4 w-4" />
-          Cierre de Caja
-        </button>
-      </div>
-
-      {/* HISTORIAL DE GASTOS */}
-      <div className="mt-2 flex flex-col gap-2">
+      {/* SECCIÓN: HISTORIAL DE GASTOS CON BOTÓN DE REGISTRAR EN EL HEADER */}
+      <div className="mt-1 flex flex-col gap-2">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-1.5">
             <ReceiptText className="h-4 w-4 text-muted-foreground" />
             <h3 className="text-xs font-bold text-foreground">Historial de Gastos</h3>
           </div>
-          <span className="text-[11px] text-muted-foreground">{filteredExpenses.length} egresos</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-muted-foreground">{filteredExpenses.length} egresos</span>
+            <button
+              onClick={() => setShowExpenseModal(true)}
+              className="text-[11px] font-bold text-rose-400 hover:underline"
+            >
+              + Nuevo Gasto
+            </button>
+          </div>
         </div>
 
         {filteredExpenses.length === 0 ? (
@@ -495,11 +494,10 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         )}
       </div>
 
-      {/* MODAL DE VERIFICACIÓN CON PIN (ESTILO NATIVO) */}
+      {/* MODAL DE VERIFICACIÓN CON PIN */}
       {expenseToVoid && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4">
           <div className="w-full max-w-sm rounded-t-3xl border-t border-border/60 bg-zinc-950 p-6 shadow-2xl sm:rounded-3xl sm:border">
-            {/* Header del Modal */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300">
@@ -519,7 +517,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
               </button>
             </div>
 
-            {/* Inputs de las 4 casillas */}
             <div className="mt-8 flex justify-center gap-3">
               {[0, 1, 2, 3].map((idx) => (
                 <input
@@ -536,12 +533,10 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
               ))}
             </div>
 
-            {/* Mensaje de error si falla */}
             {pinError && (
               <p className="mt-3 text-center text-xs font-medium text-rose-400">{pinError}</p>
             )}
 
-            {/* Botón Confirmar */}
             <button
               onClick={handleConfirmVoid}
               disabled={isVerifying || pinDigits.join('').length < 4}
@@ -559,17 +554,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
           rate={rateBCV}
           onClose={() => setShowExpenseModal(false)}
           onSaved={() => setShowExpenseModal(false)}
-        />
-      )}
-
-      {/* MODAL CIERRE */}
-      {showClosingModal && (
-        <CashClosingModal
-          open={showClosingModal}
-          onClose={() => setShowClosingModal(false)}
-          onSaved={() => setShowClosingModal(false)}
-          rate={rateBCV}
-          {...({ rate: rateBCV, onClose: () => setShowClosingModal(false), onSaved: () => setShowClosingModal(false) } as any)}
         />
       )}
     </div>
