@@ -321,20 +321,23 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         </button>
       </div>
 
-      {/* MODALES CONECTADOS */}
+      {/* MODAL DE GASTO CON ONCLOSE Y ONSAVED */}
       {showExpenseModal && (
         <ExpenseFormModal
-          open={showExpenseModal}
-          onClose={() => setShowExpenseModal(false)}
           rate={rateBCV}
+          onClose={() => setShowExpenseModal(false)}
+          onSaved={() => setShowExpenseModal(false)}
         />
       )}
 
+      {/* MODAL DE CIERRE DE CAJA */}
       {showClosingModal && (
         <CashClosingModal
           open={showClosingModal}
           onClose={() => setShowClosingModal(false)}
+          onSaved={() => setShowClosingModal(false)}
           rate={rateBCV}
+          {...({ rate: rateBCV, onClose: () => setShowClosingModal(false), onSaved: () => setShowClosingModal(false) } as any)}
         />
       )}
     </div>
