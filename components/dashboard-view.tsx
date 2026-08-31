@@ -1,23 +1,82 @@
 'use client'
 
-import { useState } from 'react'
-import { Wallet, TrendingUp, TrendingDown, DollarSign, Package, ArrowUpRight, ArrowDownLeft, Banknote, CreditCard } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { Wallet, TrendingUp, TrendingDown, DollarSign, Package } from 'lucide-react'
 
 export function DashboardView() {
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('today')
 
+  // Tasas de referencia
   const rateBCV = 794.99
-  const rateBinance = 931.50
+  const rateBinance = 930.80
 
-  // Saldos disponibles en caja
-  const cashUSD = 145.00
-  const cashBs = 8500.00
-  const bancoBs = 42350.00
-  const digitalUSDT = 320.50
+  // Recuperar transacciones reales guardadas en la app (LocalStorage)
+  const financialData = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return { totalSalesUSD: 0, totalExpensesUSD: 0, cashUSD: 0, bsTotal: 0, digitalUSD: 0, salesCount: 0 }
+    }
 
-  // Cálculo total disponible
-  const totalDisponibleUSD = cashUSD + (cashBs / rateBCV) + (bancoBs / rateBCV) + digitalUSDT
+    try {
+      const salesRaw = localStorage.getItem('rebell_sales') || '[]'
+      const expensesRaw = localStorage.getItem('rebell_expenses') || '[]'
+
+      const sales = JSON.parse(salesRaw)
+      const expenses = JSON.parse(expensesRaw)
+
+      let totalSales = 0
+      let cashUSD = 0
+      let bsTotal = 0
+      let digitalUSD = 0
+
+      sales.forEach((s: any) => {
+        const amount = Number(s.totalUSD || s.total || 0)
+        totalSales += amount
+
+        // Desglose por método de pago
+        if (s.paymentMethod === 'cash_usd' || s.method === 'cash_usd' || s.currency === 'USD') {
+          cashUSD += amount
+        } else if (s.paymentMethod === 'pago_movil' || s.paymentMethod === 'cash_bs' || s.currency === 'BS') {
+          bsTotal += Number(s.totalBS || amount * rateBCV)
+        } else if (s.paymentMethod === 'binance' || s.paymentMethod === 'zelle') {
+          digitalUSD += amount
+        } else {
+          cashUSD += amount
+        }
+      })
+
+      let totalExpenses = 0
+      expenses.forEach((e: any) => {
+        const amount = Number(e.amountUSD || e.amount || 0)
+        totalExpenses += amount
+
+        if (e.paymentMethod === 'cash_usd' || e.currency === 'USD') {
+          cashUSD -= amount
+        } else if (e.paymentMethod === 'pago_movil' || e.paymentMethod === 'cash_bs' || e.currency === 'BS') {
+          bsTotal -= Number(e.amountBS || amount * rateBCV)
+        } else if (e.paymentMethod === 'binance' || e.paymentMethod === 'zelle') {
+          digitalUSD -= amount
+        } else {
+          cashUSD -= amount
+        }
+      })
+
+      return {
+        totalSalesUSD: totalSales,
+        totalExpensesUSD: totalExpenses,
+        cashUSD: Math.max(0, cashUSD),
+        bsTotal: Math.max(0, bsTotal),
+        digitalUSD: Math.max(0, digitalUSD),
+        salesCount: sales.length,
+      }
+    } catch {
+      return { totalSalesUSD: 0, totalExpensesUSD: 0, cashUSD: 0, bsTotal: 0, digitalUSD: 0, salesCount: 0 }
+    }
+  }, [rateBCV])
+
+  // Cálculo del disponible real sumando cajas
+  const totalDisponibleUSD = financialData.cashUSD + (financialData.bsTotal / rateBCV) + financialData.digitalUSD
   const totalDisponibleBs = totalDisponibleUSD * rateBCV
+  const gananciaNeta = financialData.totalSalesUSD - financialData.totalExpensesUSD
 
   return (
     <div className="flex flex-col gap-4 pb-24">
@@ -49,7 +108,7 @@ export function DashboardView() {
         ))}
       </div>
 
-      {/* TARJETA DESTACADA: DINERO DISPONIBLE / SALDO ACTUAL */}
+      {/* TARJETA DESTACADA: DINERO DISPONIBLE EN CAJA REAL */}
       <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/30 via-card to-card p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -74,19 +133,19 @@ export function DashboardView() {
           </span>
         </div>
 
-        {/* Desglose rápido */}
+        {/* Desglose real */}
         <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border/40 pt-3 text-[11px]">
           <div>
             <p className="text-[10px] text-muted-foreground">Efectivo $</p>
-            <p className="font-mono font-bold text-foreground">${cashUSD.toFixed(2)}</p>
+            <p className="font-mono font-bold text-foreground">${financialData.cashUSD.toFixed(2)}</p>
           </div>
           <div>
             <p className="text-[10px] text-muted-foreground">Bs (Caja + Banco)</p>
-            <p className="font-mono font-bold text-foreground">Bs {(cashBs + bancoBs).toLocaleString('es-VE')}</p>
+            <p className="font-mono font-bold text-foreground">Bs {financialData.bsTotal.toLocaleString('es-VE')}</p>
           </div>
           <div>
             <p className="text-[10px] text-muted-foreground">USDT / Digital</p>
-            <p className="font-mono font-bold text-foreground">${digitalUSDT.toFixed(2)}</p>
+            <p className="font-mono font-bold text-foreground">${financialData.digitalUSD.toFixed(2)}</p>
           </div>
         </div>
       </div>
@@ -100,9 +159,11 @@ export function DashboardView() {
             <span className="text-xs font-medium">Ventas Totales</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold font-mono text-foreground">$0.00</p>
-            <p className="text-[11px] text-muted-foreground font-mono">Bs 0,00</p>
-            <p className="mt-1 text-[10px] text-muted-foreground">0 ventas</p>
+            <p className="text-lg font-bold font-mono text-foreground">${financialData.totalSalesUSD.toFixed(2)}</p>
+            <p className="text-[11px] text-muted-foreground font-mono">
+              Bs {(financialData.totalSalesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+            </p>
+            <p className="mt-1 text-[10px] text-muted-foreground">{financialData.salesCount} ventas</p>
           </div>
         </div>
 
@@ -113,8 +174,10 @@ export function DashboardView() {
             <span className="text-xs font-medium text-muted-foreground">Gastos Operativos</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold font-mono text-rose-400">$0.00</p>
-            <p className="text-[11px] text-muted-foreground font-mono">Bs 0,00</p>
+            <p className="text-lg font-bold font-mono text-rose-400">${financialData.totalExpensesUSD.toFixed(2)}</p>
+            <p className="text-[11px] text-muted-foreground font-mono">
+              Bs {(financialData.totalExpensesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+            </p>
           </div>
         </div>
 
@@ -125,8 +188,12 @@ export function DashboardView() {
             <span className="text-xs font-medium text-muted-foreground">Ganancia Neta Real</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold font-mono text-emerald-400">$0.00</p>
-            <p className="text-[11px] text-muted-foreground font-mono">Bs 0,00</p>
+            <p className={`text-lg font-bold font-mono ${gananciaNeta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              ${gananciaNeta.toFixed(2)}
+            </p>
+            <p className="text-[11px] text-muted-foreground font-mono">
+              Bs {(gananciaNeta * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+            </p>
             <p className="mt-1 text-[10px] text-muted-foreground">Margen – gastos</p>
           </div>
         </div>
