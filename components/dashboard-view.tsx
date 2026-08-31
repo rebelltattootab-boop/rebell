@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Wallet, TrendingUp, TrendingDown, DollarSign, Package } from 'lucide-react'
+import { Wallet, TrendingUp, TrendingDown, DollarSign, Package, PlusCircle, History } from 'lucide-react'
 import { useSales, useProducts, useExpenses } from '@/hooks/use-collections'
 import { landedCost } from '@/lib/types'
 
@@ -14,7 +14,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
 
   const rateBCV = typeof rate === 'number' && rate > 0 ? rate : 794.99
 
-  // Helper para detectar si una venta está anulada/cancelada
+  // Helper para detectar anuladas
   const isSaleVoided = (s: any): boolean => {
     return Boolean(
       s.voided === true ||
@@ -31,7 +31,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     )
   }
 
-  // Helper para obtener timestamp en milisegundos
+  // Helper de fecha
   const getTimestamp = (item: any): number => {
     const raw = item?.timestamp ?? item?.createdAt ?? item?.date ?? item?.fecha
     if (!raw) return Date.now()
@@ -42,7 +42,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     return isNaN(parsed) ? Date.now() : parsed
   }
 
-  // Filtrado por período (excluyendo todas las anuladas)
+  // Filtrado por período
   const filteredSales = useMemo(() => {
     const now = new Date()
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
@@ -79,7 +79,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     })
   }, [expenses, period])
 
-  // Métricas financieras calculadas con SalePayments
+  // Métricas financieras
   const metrics = useMemo(() => {
     let totalSalesUSD = 0
     let cashUSD = 0
@@ -166,7 +166,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       {/* Encabezado */}
       <div className="flex flex-col gap-0.5">
         <h2 className="text-base font-bold text-foreground">Panel financiero</h2>
-        <p className="text-xs text-muted-foreground font-mono">Tasa BCV: Bs {rateBCV.toFixed(2)} / $</p>
+        <p className="text-xs text-muted-foreground">Tasa BCV: Bs {rateBCV.toFixed(2)} / $</p>
       </div>
 
       {/* Selector de período */}
@@ -208,10 +208,10 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         </div>
 
         <div className="mt-3 flex flex-col">
-          <span className="text-2xl font-black font-mono tracking-tight text-foreground">
+          <span className="text-2xl font-bold tracking-tight text-foreground">
             ${metrics.totalDisponibleUSD.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
-          <span className="text-xs font-medium font-mono text-muted-foreground">
+          <span className="text-xs font-medium text-muted-foreground">
             ≈ Bs {metrics.totalDisponibleBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </div>
@@ -220,15 +220,15 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border/40 pt-3 text-[11px]">
           <div>
             <p className="text-[10px] text-muted-foreground">Efectivo $</p>
-            <p className="font-mono font-bold text-foreground">${metrics.cashUSD.toFixed(2)}</p>
+            <p className="font-semibold text-foreground">${metrics.cashUSD.toFixed(2)}</p>
           </div>
           <div>
             <p className="text-[10px] text-muted-foreground">Bs (Caja + Banco)</p>
-            <p className="font-mono font-bold text-foreground">Bs {metrics.bsTotal.toLocaleString('es-VE')}</p>
+            <p className="font-semibold text-foreground">Bs {metrics.bsTotal.toLocaleString('es-VE')}</p>
           </div>
           <div>
             <p className="text-[10px] text-muted-foreground">USDT / Digital</p>
-            <p className="font-mono font-bold text-foreground">${metrics.digitalUSD.toFixed(2)}</p>
+            <p className="font-semibold text-foreground">${metrics.digitalUSD.toFixed(2)}</p>
           </div>
         </div>
       </div>
@@ -242,8 +242,8 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-xs font-medium">Ventas Totales</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold font-mono text-foreground">${metrics.totalSalesUSD.toFixed(2)}</p>
-            <p className="text-[11px] text-muted-foreground font-mono">
+            <p className="text-lg font-bold text-foreground">${metrics.totalSalesUSD.toFixed(2)}</p>
+            <p className="text-[11px] text-muted-foreground">
               Bs {(metrics.totalSalesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
             <p className="mt-1 text-[10px] text-muted-foreground">{metrics.salesCount} ventas</p>
@@ -257,8 +257,8 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-xs font-medium text-muted-foreground">Gastos Operativos</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold font-mono text-rose-400">${metrics.totalExpensesUSD.toFixed(2)}</p>
-            <p className="text-[11px] text-muted-foreground font-mono">
+            <p className="text-lg font-bold text-rose-400">${metrics.totalExpensesUSD.toFixed(2)}</p>
+            <p className="text-[11px] text-muted-foreground">
               Bs {(metrics.totalExpensesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
           </div>
@@ -271,10 +271,10 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-xs font-medium text-muted-foreground">Ganancia Neta Real</span>
           </div>
           <div className="mt-2">
-            <p className={`text-lg font-bold font-mono ${metrics.gananciaNeta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            <p className={`text-lg font-bold ${metrics.gananciaNeta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
               ${metrics.gananciaNeta.toFixed(2)}
             </p>
-            <p className="text-[11px] text-muted-foreground font-mono">
+            <p className="text-[11px] text-muted-foreground">
               Bs {(metrics.gananciaNeta * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
             <p className="mt-1 text-[10px] text-muted-foreground">Margen – gastos</p>
@@ -288,13 +288,38 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-xs font-medium">Valor del Inventario</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold font-mono text-foreground">${metrics.totalInventoryValue.toFixed(2)}</p>
-            <p className="text-[11px] text-muted-foreground font-mono">
+            <p className="text-lg font-bold text-foreground">${metrics.totalInventoryValue.toFixed(2)}</p>
+            <p className="text-[11px] text-muted-foreground">
               Bs {(metrics.totalInventoryValue * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
             <p className="mt-1 text-[10px] text-muted-foreground">A costo landed</p>
           </div>
         </div>
+      </div>
+
+      {/* BOTONES DE ACCIÓN RÁPIDA: REGISTRAR GASTO Y CIERRE */}
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <button
+          onClick={() => {
+            const btn = document.querySelector('[data-expense-trigger]') as HTMLButtonElement
+            if (btn) btn.click()
+          }}
+          className="flex items-center justify-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 py-2.5 px-3 text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/20 active:scale-[0.98]"
+        >
+          <PlusCircle className="h-4 w-4" />
+          Registrar Gasto
+        </button>
+
+        <button
+          onClick={() => {
+            const btn = document.querySelector('[data-closing-trigger]') as HTMLButtonElement
+            if (btn) btn.click()
+          }}
+          className="flex items-center justify-center gap-2 rounded-xl border border-border/60 bg-secondary/60 py-2.5 px-3 text-xs font-semibold text-foreground transition-colors hover:bg-secondary active:scale-[0.98]"
+        >
+          <History className="h-4 w-4" />
+          Cierre de Caja
+        </button>
       </div>
     </div>
   )
