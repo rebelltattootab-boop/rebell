@@ -1,16 +1,32 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Wallet, TrendingUp, TrendingDown, DollarSign, Package, PlusCircle, History } from 'lucide-react'
+import { 
+  Wallet, 
+  TrendingUp, 
+  TrendingDown, 
+  DollarSign, 
+  Package, 
+  PlusCircle, 
+  History, 
+  Trash2, 
+  Calendar,
+  ReceiptText
+} from 'lucide-react'
+import { doc, updateDoc, addDoc, collection } from 'firebase/firestore'
+import { db } from '@/lib/firebase'
 import { useSales, useProducts, useExpenses } from '@/hooks/use-collections'
 import { landedCost } from '@/lib/types'
+import { useSession } from '@/context/session-context'
 import { ExpenseFormModal } from './expense-form-modal'
 import { CashClosingModal } from './cash-closing-modal'
 
 export function DashboardView({ rate = 794.99 }: { rate?: number }) {
+  const { activeUser } = useSession()
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('today')
   const [showExpenseModal, setShowExpenseModal] = useState(false)
   const [showClosingModal, setShowClosingModal] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const { sales = [] } = useSales()
   const { products = [] } = useProducts()
@@ -18,7 +34,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
 
   const rateBCV = typeof rate === 'number' && rate > 0 ? rate : 794.99
 
-  // Helper para verificar estado activo / anulado
+  // Helper de estado anulado
   const isVoided = (item: any): boolean => {
     return Boolean(
       item.status === 'void' ||
@@ -31,7 +47,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     )
   }
 
-  // Parseo universal de fecha a timestamp en milisegundos
+  // Helper universal de timestamp
   const getMillis = (item: any): number => {
     const raw = item?.createdAt ?? item?.timestamp ?? item?.date ?? item?.fecha
     if (typeof raw === 'number') return raw
@@ -42,7 +58,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     return isNaN(parsed) ? Date.now() : parsed
   }
 
-  // Límites temporales
   const timeLimits = useMemo(() => {
     const now = new Date()
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
@@ -51,7 +66,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     return { startOfToday, startOfWeek, startOfMonth }
   }, [])
 
-  // Filtrar ventas activas
+  // Ventas filtradas
   const filteredSales = useMemo(() => {
     return (sales || []).filter((s: any) => {
       if (isVoided(s)) return false
@@ -65,7 +80,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     })
   }, [sales, period, timeLimits])
 
-  // Filtrar gastos
+  // Gastos filtrados
   const filteredExpenses = useMemo(() => {
     return (expenses || []).filter((e: any) => {
       if (isVoided(e)) return false
@@ -79,14 +94,47 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     })
   }, [expenses, period, timeLimits])
 
-  // Cálculos consolidados
+  // Borrado directo y registro en auditoría
+  const handleDeleteExpense = async (exp: any) => {
+    const amount = Number(exp.amountUsd ?? exp.amountUSD ?? exp.amount ?? 0)
+    const ok = window.confirm(`¿Seguro que deseas eliminar este gasto de $${amount.toFixed(2)}?`)
+    if (!ok || !db) return
+
+    try {
+      setDeletingId(exp.id)
+      
+      // 1. Marcar anulado
+      await updateDoc(doc(db, 'expenses', exp.id), {
+        status: 'void',
+        voidedAt: Date.now(),
+        voidedBy: activeUser,
+        voidReason: 'Eliminado desde panel financiero',
+      })
+
+      // 2. Registrar en auditoría
+      await addDoc(collection(db, 'audit'), {
+        type: 'void_expense',
+        expenseId: exp.id,
+        amountUsd: amount,
+        category: exp.category || 'Gasto operativo',
+        reason: 'Eliminado desde panel financiero',
+        user: activeUser,
+        createdAt: Date.now(),
+      })
+    } catch (err: any) {
+      alert('Error al eliminar: ' + (err?.message || 'intente de nuevo'))
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  // Métricas
   const metrics = useMemo(() => {
     let totalSalesUSD = 0
     let cashUSD = 0
     let bsTotal = 0
     let digitalUSD = 0
 
-    // 1. Procesar Ventas
     filteredSales.forEach((s: any) => {
       const saleUSD = Number(s.totalUsd ?? s.totalUSD ?? s.total ?? 0)
       totalSalesUSD += saleUSD
@@ -98,9 +146,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       const zelleUSD = Number(p.zelle ?? 0)
       const binanceUSD = Number(p.binance ?? 0)
 
-      const hasPaymentsObj = (efUSD + pMovil + transf + zelleUSD + binanceUSD) > 0
-
-      if (hasPaymentsObj) {
+      if ((efUSD + pMovil + transf + zelleUSD + binanceUSD) > 0) {
         cashUSD += efUSD
         bsTotal += (pMovil + transf)
         digitalUSD += (zelleUSD + binanceUSD)
@@ -109,7 +155,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       }
     })
 
-    // 2. Procesar Gastos
     let totalExpensesUSD = 0
     filteredExpenses.forEach((e: any) => {
       const expUSD = Number(e.amountUsd ?? e.amountUSD ?? e.amount ?? 0)
@@ -127,7 +172,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       }
     })
 
-    // 3. Valor de Inventario
     const totalInventoryValue = (products || []).reduce((acc: number, p: any) => {
       const unitCost = landedCost ? landedCost(p) : Number(p.costPrice ?? p.cost ?? 0)
       const stock = Number(p.stock ?? 0)
@@ -153,7 +197,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
   }, [filteredSales, filteredExpenses, products, rateBCV])
 
   return (
-    <div className="flex flex-col gap-4 pb-24">
+    <div className="flex flex-col gap-4 pb-28">
       {/* Encabezado */}
       <div className="flex flex-col gap-0.5">
         <h2 className="text-base font-bold text-foreground">Panel financiero</h2>
@@ -207,7 +251,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
           </span>
         </div>
 
-        {/* Desglose real por método */}
         <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border/40 pt-3 text-[11px]">
           <div>
             <p className="text-[10px] text-muted-foreground">Efectivo $</p>
@@ -226,7 +269,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
 
       {/* 4 TARJETAS DE MÉTRICAS */}
       <div className="grid grid-cols-2 gap-2.5">
-        {/* Ventas Totales */}
         <div className="flex flex-col justify-between rounded-xl border border-border/60 bg-card p-3">
           <div className="flex items-center gap-1.5 text-muted-foreground">
             <DollarSign className="h-4 w-4" />
@@ -241,7 +283,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
           </div>
         </div>
 
-        {/* Gastos Operativos */}
         <div className="flex flex-col justify-between rounded-xl border border-border/60 bg-card p-3">
           <div className="flex items-center gap-1.5 text-rose-400">
             <TrendingDown className="h-4 w-4" />
@@ -255,7 +296,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
           </div>
         </div>
 
-        {/* Ganancia Neta Real */}
         <div className="flex flex-col justify-between rounded-xl border border-border/60 bg-card p-3">
           <div className="flex items-center gap-1.5 text-emerald-400">
             <TrendingUp className="h-4 w-4" />
@@ -272,7 +312,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
           </div>
         </div>
 
-        {/* Valor del Inventario */}
         <div className="flex flex-col justify-between rounded-xl border border-border/60 bg-card p-3">
           <div className="flex items-center gap-1.5 text-muted-foreground">
             <Package className="h-4 w-4" />
@@ -288,8 +327,8 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         </div>
       </div>
 
-      {/* BOTONES DE ACCIÓN: REGISTRAR GASTO Y CIERRE DE CAJA */}
-      <div className="mt-2 grid grid-cols-2 gap-2">
+      {/* BOTONES DE ACCIÓN */}
+      <div className="grid grid-cols-2 gap-2">
         <button
           onClick={() => setShowExpenseModal(true)}
           className="flex items-center justify-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 py-2.5 px-3 text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/20 active:scale-[0.98]"
@@ -307,7 +346,85 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         </button>
       </div>
 
-      {/* MODAL DE GASTO */}
+      {/* HISTORIAL DE GASTOS CON BOTÓN DE ELIMINAR */}
+      <div className="mt-2 flex flex-col gap-2">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-1.5">
+            <ReceiptText className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-xs font-bold text-foreground">Historial de Gastos</h3>
+          </div>
+          <span className="text-[11px] text-muted-foreground">{filteredExpenses.length} egresos</span>
+        </div>
+
+        {filteredExpenses.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border/60 p-5 text-center text-xs text-muted-foreground">
+            No hay gastos registrados en este período.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {filteredExpenses.map((exp: any) => {
+              const expUSD = Number(exp.amountUsd ?? exp.amountUSD ?? exp.amount ?? 0)
+              const expDate = new Date(getMillis(exp))
+              const formattedDate = expDate.toLocaleDateString('es-VE', {
+                day: '2-digit',
+                month: 'short',
+                hour: '2-digit',
+                minute: '2-digit'
+              })
+
+              return (
+                <div
+                  key={exp.id}
+                  className="flex items-center justify-between rounded-xl border border-border/60 bg-card p-3 shadow-sm transition-all"
+                >
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-foreground">
+                        {exp.category || 'Gasto operativo'}
+                      </span>
+                      <span className="rounded bg-secondary px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground uppercase">
+                        {exp.method || 'Efectivo USD'}
+                      </span>
+                    </div>
+
+                    {exp.note && (
+                      <p className="text-[11px] text-muted-foreground">{exp.note}</p>
+                    )}
+
+                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground/80">
+                      <span className="flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        {formattedDate}
+                      </span>
+                      {exp.user && <span>• Por {exp.user}</span>}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5">
+                    <div className="text-right">
+                      <p className="text-xs font-bold text-rose-400">-${expUSD.toFixed(2)}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Bs {(expUSD * (exp.rate || rateBCV)).toLocaleString('es-VE', { maximumFractionDigits: 0 })}
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => handleDeleteExpense(exp)}
+                      disabled={deletingId === exp.id}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/50 text-muted-foreground transition-colors hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-400 active:scale-95 disabled:opacity-50"
+                      title="Eliminar gasto"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* MODAL GASTO */}
       {showExpenseModal && (
         <ExpenseFormModal
           rate={rateBCV}
@@ -316,7 +433,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         />
       )}
 
-      {/* MODAL DE CIERRE DE CAJA */}
+      {/* MODAL CIERRE */}
       {showClosingModal && (
         <CashClosingModal
           open={showClosingModal}
