@@ -1,261 +1,230 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import {
-  Boxes,
-  Coins,
-  Receipt,
-  TrendingDown,
-  TrendingUp,
-  Wallet,
-} from 'lucide-react'
-import {
-  useExpenses,
-  useProducts,
-  useSales,
-} from '@/hooks/use-collections'
-import { bs, saleDate, usd } from '@/lib/format'
-import {
-  RANGE_OPTIONS,
-  grossMargin,
-  inRange,
-  inventoryValue,
-  isActive,
-  totalExpenses,
-  type RangeKey,
-} from '@/lib/finance'
-import { ExpenseFormModal } from './expense-form-modal'
-import { CashClosingModal } from './cash-closing-modal'
+import { useState } from 'react'
+import { Wallet, ArrowUpRight, ArrowDownLeft, DollarSign, CreditCard, Banknote, RefreshCcw, PlusCircle, MinusCircle } from 'lucide-react'
+import { useSession } from '@/context/session-context'
 
-export function DashboardView({ rate }: { rate: number | null }) {
-  const { products } = useProducts()
-  const { sales } = useSales()
-  const { expenses } = useExpenses()
-  const [range, setRange] = useState<RangeKey>('today')
-  const [expenseOpen, setExpenseOpen] = useState(false)
-  const [closingOpen, setClosingOpen] = useState(false)
-  const [feedback, setFeedback] = useState<string | null>(null)
-
-  const metrics = useMemo(() => {
-    const now = new Date()
-    const rangedSales = sales.filter(
-      (s) => isActive(s) && inRange(s.createdAt, range, now),
-    )
-    const rangedExpenses = expenses.filter((e) => inRange(e.createdAt, range, now))
-
-    const grossSales = rangedSales.reduce((s, sale) => s + sale.totalUsd, 0)
-    const expensesUsd = totalExpenses(rangedExpenses)
-    const margin = grossMargin(rangedSales, products)
-    const netProfit = margin - expensesUsd
-
-    return {
-      grossSales,
-      expensesUsd,
-      netProfit,
-      inventory: inventoryValue(products),
-      count: rangedSales.length,
-    }
-  }, [sales, expenses, products, range])
-
-  // Recent expenses are shown regardless of range so the log stays visible.
-  const recentExpenses = expenses.slice(0, 6)
-
-  return (
-    <div className="flex flex-col gap-5 pb-28">
-      <header>
-        <h1 className="text-xl font-semibold tracking-tight">Panel financiero</h1>
-        <p className="text-sm text-muted-foreground">
-          {rate ? `Tasa BCV: ${bs(rate)} / $` : 'Cargando tasa BCV…'}
-        </p>
-      </header>
-
-      {feedback && (
-        <p className="rounded-xl border border-success/40 bg-success/10 px-4 py-2.5 text-sm text-success">
-          {feedback}
-        </p>
-      )}
-
-      {/* Range filter */}
-      <div
-        role="tablist"
-        aria-label="Rango de tiempo"
-        className="grid grid-cols-4 gap-1 rounded-xl bg-secondary/60 p-1"
-      >
-        {RANGE_OPTIONS.map((o) => {
-          const active = range === o.id
-          return (
-            <button
-              key={o.id}
-              role="tab"
-              aria-selected={active}
-              onClick={() => setRange(o.id)}
-              className={`rounded-lg py-2 text-xs font-semibold transition-colors ${
-                active
-                  ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'text-muted-foreground'
-              }`}
-            >
-              {o.label}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* KPI grid */}
-      <div className="grid grid-cols-2 gap-3">
-        <KpiCard
-          icon={<Wallet className="h-4 w-4" />}
-          label="Ventas Totales"
-          valueUsd={metrics.grossSales}
-          rate={rate}
-          hint={`${metrics.count} ventas`}
-        />
-        <KpiCard
-          icon={<TrendingDown className="h-4 w-4" />}
-          label="Gastos Operativos"
-          valueUsd={metrics.expensesUsd}
-          rate={rate}
-          valueClass="text-rose-400"
-        />
-        <KpiCard
-          icon={<TrendingUp className="h-4 w-4" />}
-          label="Ganancia Neta Real"
-          valueUsd={metrics.netProfit}
-          rate={rate}
-          valueClass="text-emerald-500"
-          hint="Margen − gastos"
-        />
-        <KpiCard
-          icon={<Boxes className="h-4 w-4" />}
-          label="Valor del Inventario"
-          valueUsd={metrics.inventory}
-          rate={rate}
-          hint="A costo landed"
-        />
-      </div>
-
-      {/* Actions */}
-      <div className="grid grid-cols-2 gap-3">
-        <button
-          onClick={() => setExpenseOpen(true)}
-          className="flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground active:opacity-80"
-        >
-          <Receipt className="h-4 w-4" />
-          Registrar Gasto
-        </button>
-        <button
-          onClick={() => setClosingOpen(true)}
-          className="flex h-12 items-center justify-center gap-2 rounded-xl border border-border bg-card text-sm font-semibold active:opacity-80"
-        >
-          <Coins className="h-4 w-4" />
-          Cierre de Caja
-        </button>
-      </div>
-
-      {/* Recent expenses */}
-      <section>
-        <h2 className="mb-2 text-sm font-semibold text-muted-foreground">
-          Gastos recientes
-        </h2>
-        {recentExpenses.length === 0 ? (
-          <p className="rounded-xl bg-card/60 px-4 py-6 text-center text-sm text-muted-foreground">
-            Aún no hay gastos registrados.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {recentExpenses.map((e) => (
-              <li
-                key={e.id}
-                className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3"
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-medium">
-                      {e.category}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {e.method}
-                    </span>
-                  </div>
-                  <div className="mt-1 truncate text-xs text-muted-foreground">
-                    {e.note ? `${e.note} · ` : ''}
-                    {saleDate(e.createdAt)} · {e.user}
-                  </div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <div className="text-sm font-semibold text-rose-400 tabular-nums">
-                    -{usd(e.amountUsd)}
-                  </div>
-                  <div className="text-xs text-muted-foreground tabular-nums">
-                    {bs(e.amountBs)}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {expenseOpen && (
-        <ExpenseFormModal
-          rate={rate}
-          onClose={() => setExpenseOpen(false)}
-          onSaved={(msg) => {
-            setExpenseOpen(false)
-            setFeedback(msg)
-          }}
-        />
-      )}
-
-      {closingOpen && (
-        <CashClosingModal
-          sales={sales}
-          rate={rate}
-          onClose={() => setClosingOpen(false)}
-          onSaved={(msg) => {
-            setClosingOpen(false)
-            setFeedback(msg)
-          }}
-        />
-      )}
-    </div>
-  )
+interface Transaction {
+  id: string
+  type: 'income' | 'expense'
+  description: string
+  amountUSD: number
+  method: 'cash_usd' | 'cash_bs' | 'pago_movil' | 'binance' | 'zelle'
+  date: string
+  user: string
 }
 
-function KpiCard({
-  icon,
-  label,
-  valueUsd,
-  rate,
-  valueClass,
-  hint,
-}: {
-  icon: React.ReactNode
-  label: string
-  valueUsd: number
-  rate: number | null
-  valueClass?: string
-  hint?: string
-}) {
+export function FinanceView() {
+  const { activeUser } = useSession()
+
+  // Tasas de referencia (pueden venir del estado global)
+  const rateBCV = 794.99
+  const rateBinance = 931.80
+
+  // Saldos base / acumulados por método de pago
+  const [balances, setBalances] = useState({
+    cashUSD: 145.00,
+    cashBS: 8500.00,
+    pagoMovil: 42350.00,
+    binanceUSDT: 320.50,
+    zelle: 0.00
+  })
+
+  // Transacciones recientes de caja
+  const [transactions, setTransactions] = useState<Transaction[]>([
+    {
+      id: 'tx-1',
+      type: 'income',
+      description: 'Venta #1042 - Agujas RL y Tinta Dynamic',
+      amountUSD: 35.00,
+      method: 'pago_movil',
+      date: 'Hoy, 06:15 a.m.',
+      user: activeUser || 'José'
+    },
+    {
+      id: 'tx-2',
+      type: 'expense',
+      description: 'Pago de hielo y agua para estudio',
+      amountUSD: 5.00,
+      method: 'cash_bs',
+      date: 'Hoy, 05:40 a.m.',
+      user: activeUser || 'José'
+    }
+  ])
+
+  // Cálculo de totales disponibles en USD equivalente
+  const totalCashUSD = balances.cashUSD
+  const totalCashBStoUSD = balances.cashBS / rateBCV
+  const totalPagoMoviltoUSD = balances.pagoMovil / rateBCV
+  const totalDigitalUSD = balances.binanceUSDT + balances.zelle
+
+  const totalDisponibleUSD = totalCashUSD + totalCashBStoUSD + totalPagoMoviltoUSD + totalDigitalUSD
+  const totalDisponibleBS = totalDisponibleUSD * rateBCV
+
   return (
-    <div className="rounded-2xl border border-border bg-card p-4">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        {icon}
-        <span className="truncate">{label}</span>
-      </div>
-      <div
-        className={`mt-2 text-2xl font-semibold tracking-tight tabular-nums ${valueClass ?? ''}`}
-      >
-        {usd(valueUsd)}
-      </div>
-      {rate && (
-        <div className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-          {bs(valueUsd * rate)}
+    <div className="flex flex-col gap-4 pb-24">
+      {/* TARJETA PRINCIPAL: SALDO TOTAL DISPONIBLE */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-950/40 via-card to-card p-5 border border-emerald-500/20 shadow-lg">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
+              <Wallet className="h-4 w-4" />
+            </div>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Dinero Total Disponible
+            </span>
+          </div>
+          <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-400">
+            Caja Abierta
+          </span>
         </div>
-      )}
-      {hint && (
-        <div className="mt-1.5 text-[11px] text-muted-foreground">{hint}</div>
-      )}
+
+        <div className="mt-4 flex flex-col gap-1">
+          <div className="text-3xl font-extrabold tracking-tight text-foreground font-mono">
+            ${totalDisponibleUSD.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <div className="text-xs font-medium text-muted-foreground font-mono">
+            ≈ Bs {totalDisponibleBS.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Tasa BCV)
+          </div>
+        </div>
+
+        {/* Resumen rápido de Ingresos / Gastos */}
+        <div className="mt-5 grid grid-cols-2 gap-3 border-t border-border/40 pt-3">
+          <div className="flex items-center gap-2">
+            <div className="rounded-md bg-emerald-500/10 p-1.5 text-emerald-400">
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </div>
+            <div>
+              <p className="text-[10px] text-muted-foreground">Ingresos Hoy</p>
+              <p className="text-xs font-bold text-foreground font-mono">+$35.00</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="rounded-md bg-rose-500/10 p-1.5 text-rose-400">
+              <ArrowDownLeft className="h-3.5 w-3.5" />
+            </div>
+            <div>
+              <p className="text-[10px] text-muted-foreground">Gastos Hoy</p>
+              <p className="text-xs font-bold text-foreground font-mono">-$5.00</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* DESGLOSE POR MÉTODOS DE PAGO */}
+      <div className="flex flex-col gap-2">
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
+          Desglose por Cuentas / Métodos
+        </h3>
+
+        <div className="grid grid-cols-2 gap-2.5">
+          {/* Efectivo USD */}
+          <div className="flex flex-col justify-between rounded-xl border border-border/60 bg-card p-3 shadow-sm">
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span className="text-[11px] font-medium">Efectivo USD</span>
+              <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
+            </div>
+            <div className="mt-2">
+              <p className="text-sm font-bold font-mono text-foreground">${balances.cashUSD.toFixed(2)}</p>
+              <p className="text-[10px] text-muted-foreground">Caja física $</p>
+            </div>
+          </div>
+
+          {/* Efectivo Bs */}
+          <div className="flex flex-col justify-between rounded-xl border border-border/60 bg-card p-3 shadow-sm">
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span className="text-[11px] font-medium">Efectivo Bs</span>
+              <Banknote className="h-3.5 w-3.5 text-sky-400" />
+            </div>
+            <div className="mt-2">
+              <p className="text-sm font-bold font-mono text-foreground">Bs {balances.cashBS.toLocaleString('es-VE')}</p>
+              <p className="text-[10px] text-muted-foreground font-mono">≈ ${(balances.cashBS / rateBCV).toFixed(2)}</p>
+            </div>
+          </div>
+
+          {/* Pago Móvil / Bancos */}
+          <div className="flex flex-col justify-between rounded-xl border border-border/60 bg-card p-3 shadow-sm">
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span className="text-[11px] font-medium">Pago Móvil / Banco</span>
+              <CreditCard className="h-3.5 w-3.5 text-amber-400" />
+            </div>
+            <div className="mt-2">
+              <p className="text-sm font-bold font-mono text-foreground">Bs {balances.pagoMovil.toLocaleString('es-VE')}</p>
+              <p className="text-[10px] text-muted-foreground font-mono">≈ ${(balances.pagoMovil / rateBCV).toFixed(2)}</p>
+            </div>
+          </div>
+
+          {/* Binance USDT / Zelle */}
+          <div className="flex flex-col justify-between rounded-xl border border-border/60 bg-card p-3 shadow-sm">
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span className="text-[11px] font-medium">Binance / Zelle</span>
+              <DollarSign className="h-3.5 w-3.5 text-violet-400" />
+            </div>
+            <div className="mt-2">
+              <p className="text-sm font-bold font-mono text-foreground">${balances.binanceUSDT.toFixed(2)} USDT</p>
+              <p className="text-[10px] text-muted-foreground font-mono">${balances.zelle.toFixed(2)} Zelle</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ACCIONES RÁPIDAS DE CAJA */}
+      <div className="grid grid-cols-2 gap-2 pt-1">
+        <button className="flex items-center justify-center gap-2 rounded-xl bg-primary/10 border border-primary/20 py-2.5 px-3 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors">
+          <PlusCircle className="h-4 w-4" />
+          Registrar Entrada
+        </button>
+        <button className="flex items-center justify-center gap-2 rounded-xl bg-rose-500/10 border border-rose-500/20 py-2.5 px-3 text-xs font-semibold text-rose-400 hover:bg-rose-500/20 transition-colors">
+          <MinusCircle className="h-4 w-4" />
+          Registrar Gasto
+        </button>
+      </div>
+
+      {/* MOVIMIENTOS RECIENTES DE CAJA */}
+      <div className="flex flex-col gap-2 pt-2">
+        <div className="flex items-center justify-between px-1">
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Movimientos Recientes
+          </h3>
+          <span className="text-[10px] text-muted-foreground">{transactions.length} registros</span>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {transactions.map((tx) => (
+            <div
+              key={tx.id}
+              className="flex items-center justify-between rounded-xl border border-border/60 bg-card p-3 shadow-sm"
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className={`rounded-lg p-2 ${
+                    tx.type === 'income' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+                  }`}
+                >
+                  {tx.type === 'income' ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownLeft className="h-4 w-4" />}
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs font-semibold">{tx.description}</span>
+                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <span>{tx.date}</span>
+                    <span>•</span>
+                    <span className="capitalize">{tx.method.replace('_', ' ')}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="text-right">
+                <span
+                  className={`text-xs font-mono font-bold ${
+                    tx.type === 'income' ? 'text-emerald-400' : 'text-rose-400'
+                  }`}
+                >
+                  {tx.type === 'income' ? '+' : '-'}${tx.amountUSD.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
