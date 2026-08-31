@@ -51,39 +51,23 @@ export function AppShell() {
           </div>
         </div>
 
-        {/* Active profile switcher — stamps every action with this identity */}
-        <div
-          role="group"
-          aria-label="Perfil activo"
-          className="flex items-center gap-1 rounded-xl bg-secondary/60 p-1"
-        >
-          {ACTIVE_USERS.map((u) => {
-            const active = activeUser === u
-            return (
-              <button
-                key={u}
-                onClick={() => setActiveUser(u)}
-                aria-pressed={active}
-                className={`flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-colors ${
-                  active
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground'
-                }`}
-              >
-                <span
-                  className={`flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ${
-                    active
-                      ? 'bg-primary-foreground/20'
-                      : 'bg-secondary text-foreground'
-                  }`}
-                >
-                  {u.charAt(0)}
-                </span>
-                {u}
-              </button>
-            )
-          })}
-        </div>
+                {/* Top bar */}
+        <header className="sticky top-0 z-20 flex flex-col gap-3 border-b border-border/40 bg-background/80 px-5 py-3 backdrop-blur-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <BrandLogo size={38} />
+              <div className="leading-tight">
+                <div className="text-sm font-semibold">Rebell Tattoo Supply</div>
+                <div className="text-xs text-muted-foreground">
+                  Perfil activo: <span className="font-semibold text-emerald-400">{activeUser}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Live rates */}
+
       </header>
 
       {/* Live rates */}
