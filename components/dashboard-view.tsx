@@ -14,6 +14,23 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
 
   const rateBCV = typeof rate === 'number' && rate > 0 ? rate : 794.99
 
+  // Helper para detectar si una venta está anulada/cancelada
+  const isSaleVoided = (s: any): boolean => {
+    return Boolean(
+      s.voided === true ||
+      s.isVoided === true ||
+      s.anulado === true ||
+      s.anulada === true ||
+      s.voidedAt ||
+      s.anuladoAt ||
+      s.voidReason ||
+      s.status === 'voided' ||
+      s.status === 'cancelled' ||
+      s.status === 'anulada' ||
+      s.status === 'anulado'
+    )
+  }
+
   // Helper para obtener timestamp en milisegundos
   const getTimestamp = (item: any): number => {
     const raw = item?.timestamp ?? item?.createdAt ?? item?.date ?? item?.fecha
@@ -25,7 +42,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     return isNaN(parsed) ? Date.now() : parsed
   }
 
-  // Filtrado por período
+  // Filtrado por período (excluyendo todas las anuladas)
   const filteredSales = useMemo(() => {
     const now = new Date()
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
@@ -33,7 +50,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
 
     return (sales || []).filter((s: any) => {
-      if (s.status === 'cancelled' || s.voided || s.anulada || s.anulado || s.isVoided) return false
+      if (isSaleVoided(s)) return false
       if (period === 'all') return true
 
       const ts = getTimestamp(s)
@@ -51,6 +68,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
 
     return (expenses || []).filter((e: any) => {
+      if (isSaleVoided(e)) return false
       if (period === 'all') return true
 
       const ts = getTimestamp(e)
@@ -69,10 +87,8 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     let digitalUSD = 0
 
     filteredSales.forEach((s: any) => {
-      // 1. Total de la venta
       let saleTotalUSD = Number(s.totalUSD ?? s.total ?? s.subtotal ?? 0)
       
-      // Si el total viene calculado desde los items
       if (!saleTotalUSD && Array.isArray(s.items)) {
         saleTotalUSD = s.items.reduce((acc: number, it: any) => {
           return acc + (Number(it.unitPrice || it.price || 0) * Number(it.quantity || 1))
@@ -80,7 +96,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       }
       totalSalesUSD += saleTotalUSD
 
-      // 2. Desglose exacto de pagos (SalePayments)
       const p = s.payments || s.payment || {}
       const efUSD = Number(p.efectivoUsd ?? s.efectivoUsd ?? 0)
       const pMovil = Number(p.pagoMovil ?? s.pagoMovil ?? 0)
@@ -95,7 +110,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         bsTotal += (pMovil + transf)
         digitalUSD += (zelleUSD + binanceUSD)
       } else {
-        // Fallback según método tradicional si no tiene objeto payments
         const method = String(s.paymentMethod || s.method || '').toLowerCase()
         if (method.includes('bs') || method.includes('pago') || method.includes('movil') || method.includes('transf')) {
           bsTotal += Number(s.totalBS ?? s.montoBS ?? (saleTotalUSD * rateBCV))
@@ -107,7 +121,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       }
     })
 
-    // 3. Gastos
     let totalExpensesUSD = 0
     filteredExpenses.forEach((e: any) => {
       const expUSD = Number(e.amountUSD ?? e.amount ?? e.monto ?? e.totalUSD ?? 0)
@@ -124,7 +137,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       }
     })
 
-    // 4. Inventario
     const totalInventoryValue = (products || []).reduce((acc: number, p: any) => {
       const unitCost = landedCost ? landedCost(p) : Number(p.costPrice ?? p.cost ?? p.price ?? 0)
       const stock = Number(p.stock ?? 0)
