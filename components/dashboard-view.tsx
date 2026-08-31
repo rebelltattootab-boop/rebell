@@ -2,81 +2,100 @@
 
 import { useState, useMemo } from 'react'
 import { Wallet, TrendingUp, TrendingDown, DollarSign, Package } from 'lucide-react'
+import { useSales, useProducts, useExpenses } from '@/hooks/use-collections'
+import { useRates } from '@/hooks/use-rates'
+import { usd, bs } from '@/lib/format'
 
 export function DashboardView() {
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('today')
 
-  // Tasas de referencia
-  const rateBCV = 794.99
-  const rateBinance = 930.80
+  const { rates } = useRates()
+  const { sales = [] } = useSales()
+  const { products = [] } = useProducts()
+  const { expenses = [] } = useExpenses?.() || { expenses: [] }
 
-  // Recuperar transacciones reales guardadas en la app (LocalStorage)
-  const financialData = useMemo(() => {
-    if (typeof window === 'undefined') {
-      return { totalSalesUSD: 0, totalExpensesUSD: 0, cashUSD: 0, bsTotal: 0, digitalUSD: 0, salesCount: 0 }
-    }
+  const rateBCV = rates?.bcv || 794.99
 
-    try {
-      const salesRaw = localStorage.getItem('rebell_sales') || '[]'
-      const expensesRaw = localStorage.getItem('rebell_expenses') || '[]'
+  // Filtrar según el período seleccionado
+  const filteredSales = useMemo(() => {
+    const now = new Date()
+    return sales.filter((s: any) => {
+      if (s.status === 'cancelled' || s.voided || s.anulada) return false
+      const saleDate = new Date(s.timestamp || s.createdAt || s.date || Date.now())
 
-      const sales = JSON.parse(salesRaw)
-      const expenses = JSON.parse(expensesRaw)
-
-      let totalSales = 0
-      let cashUSD = 0
-      let bsTotal = 0
-      let digitalUSD = 0
-
-      sales.forEach((s: any) => {
-        const amount = Number(s.totalUSD || s.total || 0)
-        totalSales += amount
-
-        // Desglose por método de pago
-        if (s.paymentMethod === 'cash_usd' || s.method === 'cash_usd' || s.currency === 'USD') {
-          cashUSD += amount
-        } else if (s.paymentMethod === 'pago_movil' || s.paymentMethod === 'cash_bs' || s.currency === 'BS') {
-          bsTotal += Number(s.totalBS || amount * rateBCV)
-        } else if (s.paymentMethod === 'binance' || s.paymentMethod === 'zelle') {
-          digitalUSD += amount
-        } else {
-          cashUSD += amount
-        }
-      })
-
-      let totalExpenses = 0
-      expenses.forEach((e: any) => {
-        const amount = Number(e.amountUSD || e.amount || 0)
-        totalExpenses += amount
-
-        if (e.paymentMethod === 'cash_usd' || e.currency === 'USD') {
-          cashUSD -= amount
-        } else if (e.paymentMethod === 'pago_movil' || e.paymentMethod === 'cash_bs' || e.currency === 'BS') {
-          bsTotal -= Number(e.amountBS || amount * rateBCV)
-        } else if (e.paymentMethod === 'binance' || e.paymentMethod === 'zelle') {
-          digitalUSD -= amount
-        } else {
-          cashUSD -= amount
-        }
-      })
-
-      return {
-        totalSalesUSD: totalSales,
-        totalExpensesUSD: totalExpenses,
-        cashUSD: Math.max(0, cashUSD),
-        bsTotal: Math.max(0, bsTotal),
-        digitalUSD: Math.max(0, digitalUSD),
-        salesCount: sales.length,
+      if (period === 'today') {
+        return saleDate.toDateString() === now.toDateString()
       }
-    } catch {
-      return { totalSalesUSD: 0, totalExpensesUSD: 0, cashUSD: 0, bsTotal: 0, digitalUSD: 0, salesCount: 0 }
-    }
-  }, [rateBCV])
+      if (period === 'week') {
+        const weekAgo = new Date(now)
+        weekAgo.setDate(now.getDate() - 7)
+        return saleDate >= weekAgo
+      }
+      if (period === 'month') {
+        return saleDate.getMonth() === now.getMonth() && saleDate.getFullYear() === now.getFullYear()
+      }
+      return true
+    })
+  }, [sales, period])
 
-  // Cálculo del disponible real sumando cajas
-  const totalDisponibleUSD = financialData.cashUSD + (financialData.bsTotal / rateBCV) + financialData.digitalUSD
-  const totalDisponibleBs = totalDisponibleUSD * rateBCV
-  const gananciaNeta = financialData.totalSalesUSD - financialData.totalExpensesUSD
+  // Desglose financiero real
+  const financialMetrics = useMemo(() => {
+    let totalSalesUSD = 0
+    let cashUSD = 0
+    let bsTotal = 0
+    let digitalUSD = 0
+
+    filteredSales.forEach((s: any) => {
+      const amountUSD = Number(s.totalUSD || s.total || 0)
+      totalSalesUSD += amountUSD
+
+      const method = s.paymentMethod || s.method || ''
+      if (method === 'cash_usd' || (!method && s.currency === 'USD')) {
+        cashUSD += amountUSD
+      } else if (method === 'pago_movil' || method === 'cash_bs' || s.currency === 'BS') {
+        bsTotal += Number(s.totalBS || amountUSD * rateBCV)
+      } else if (method === 'binance' || method === 'zelle') {
+        digitalUSD += amountUSD
+      } else {
+        cashUSD += amountUSD
+      }
+    })
+
+    let totalExpensesUSD = 0
+    expenses.forEach((e: any) => {
+      const expAmount = Number(e.amountUSD || e.amount || 0)
+      totalExpensesUSD += expAmount
+
+      const method = e.paymentMethod || e.method || ''
+      if (method === 'cash_usd') cashUSD -= expAmount
+      else if (method === 'pago_movil' || method === 'cash_bs') bsTotal -= Number(e.amountBS || expAmount * rateBCV)
+      else if (method === 'binance' || method === 'zelle') digitalUSD -= expAmount
+      else cashUSD -= expAmount
+    })
+
+    const totalInventoryValue = products.reduce((acc: number, p: any) => {
+      const cost = Number(p.costPrice || p.cost || p.price || 0)
+      const stock = Number(p.stock || 0)
+      return acc + (cost * stock)
+    }, 0)
+
+    const totalDisponibleUSD = cashUSD + (bsTotal / rateBCV) + digitalUSD
+    const totalDisponibleBs = totalDisponibleUSD * rateBCV
+    const gananciaNeta = totalSalesUSD - totalExpensesUSD
+
+    return {
+      totalSalesUSD,
+      totalExpensesUSD,
+      gananciaNeta,
+      cashUSD: Math.max(0, cashUSD),
+      bsTotal: Math.max(0, bsTotal),
+      digitalUSD: Math.max(0, digitalUSD),
+      totalDisponibleUSD: Math.max(0, totalDisponibleUSD),
+      totalDisponibleBs: Math.max(0, totalDisponibleBs),
+      totalInventoryValue,
+      salesCount: filteredSales.length
+    }
+  }, [filteredSales, expenses, products, rateBCV])
 
   return (
     <div className="flex flex-col gap-4 pb-24">
@@ -126,31 +145,31 @@ export function DashboardView() {
 
         <div className="mt-3 flex flex-col">
           <span className="text-2xl font-black font-mono tracking-tight text-foreground">
-            ${totalDisponibleUSD.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ${financialMetrics.totalDisponibleUSD.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
           <span className="text-xs font-medium font-mono text-muted-foreground">
-            ≈ Bs {totalDisponibleBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ≈ Bs {financialMetrics.totalDisponibleBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </div>
 
-        {/* Desglose real */}
+        {/* Desglose real por métodos */}
         <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border/40 pt-3 text-[11px]">
           <div>
             <p className="text-[10px] text-muted-foreground">Efectivo $</p>
-            <p className="font-mono font-bold text-foreground">${financialData.cashUSD.toFixed(2)}</p>
+            <p className="font-mono font-bold text-foreground">${financialMetrics.cashUSD.toFixed(2)}</p>
           </div>
           <div>
             <p className="text-[10px] text-muted-foreground">Bs (Caja + Banco)</p>
-            <p className="font-mono font-bold text-foreground">Bs {financialData.bsTotal.toLocaleString('es-VE')}</p>
+            <p className="font-mono font-bold text-foreground">Bs {financialMetrics.bsTotal.toLocaleString('es-VE')}</p>
           </div>
           <div>
             <p className="text-[10px] text-muted-foreground">USDT / Digital</p>
-            <p className="font-mono font-bold text-foreground">${financialData.digitalUSD.toFixed(2)}</p>
+            <p className="font-mono font-bold text-foreground">${financialMetrics.digitalUSD.toFixed(2)}</p>
           </div>
         </div>
       </div>
 
-      {/* MÉTRICAS DE VENTAS Y GASTOS (4 Tarjetas) */}
+      {/* MÉTRICAS DE VENTAS Y GASTOS */}
       <div className="grid grid-cols-2 gap-2.5">
         {/* Ventas Totales */}
         <div className="flex flex-col justify-between rounded-xl border border-border/60 bg-card p-3">
@@ -159,11 +178,11 @@ export function DashboardView() {
             <span className="text-xs font-medium">Ventas Totales</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold font-mono text-foreground">${financialData.totalSalesUSD.toFixed(2)}</p>
+            <p className="text-lg font-bold font-mono text-foreground">${financialMetrics.totalSalesUSD.toFixed(2)}</p>
             <p className="text-[11px] text-muted-foreground font-mono">
-              Bs {(financialData.totalSalesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+              Bs {(financialMetrics.totalSalesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
-            <p className="mt-1 text-[10px] text-muted-foreground">{financialData.salesCount} ventas</p>
+            <p className="mt-1 text-[10px] text-muted-foreground">{financialMetrics.salesCount} ventas</p>
           </div>
         </div>
 
@@ -174,9 +193,9 @@ export function DashboardView() {
             <span className="text-xs font-medium text-muted-foreground">Gastos Operativos</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold font-mono text-rose-400">${financialData.totalExpensesUSD.toFixed(2)}</p>
+            <p className="text-lg font-bold font-mono text-rose-400">${financialMetrics.totalExpensesUSD.toFixed(2)}</p>
             <p className="text-[11px] text-muted-foreground font-mono">
-              Bs {(financialData.totalExpensesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+              Bs {(financialMetrics.totalExpensesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
           </div>
         </div>
@@ -188,11 +207,11 @@ export function DashboardView() {
             <span className="text-xs font-medium text-muted-foreground">Ganancia Neta Real</span>
           </div>
           <div className="mt-2">
-            <p className={`text-lg font-bold font-mono ${gananciaNeta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              ${gananciaNeta.toFixed(2)}
+            <p className={`text-lg font-bold font-mono ${financialMetrics.gananciaNeta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              ${financialMetrics.gananciaNeta.toFixed(2)}
             </p>
             <p className="text-[11px] text-muted-foreground font-mono">
-              Bs {(gananciaNeta * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+              Bs {(financialMetrics.gananciaNeta * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
             <p className="mt-1 text-[10px] text-muted-foreground">Margen – gastos</p>
           </div>
@@ -205,8 +224,10 @@ export function DashboardView() {
             <span className="text-xs font-medium">Valor del Inventario</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold font-mono text-foreground">$1,703.35</p>
-            <p className="text-[11px] text-muted-foreground font-mono">Bs 1.354.149,11</p>
+            <p className="text-lg font-bold font-mono text-foreground">${financialMetrics.totalInventoryValue.toFixed(2)}</p>
+            <p className="text-[11px] text-muted-foreground font-mono">
+              Bs {(financialMetrics.totalInventoryValue * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+            </p>
             <p className="mt-1 text-[10px] text-muted-foreground">A costo landed</p>
           </div>
         </div>
