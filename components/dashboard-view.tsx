@@ -4,9 +4,13 @@ import { useState, useMemo } from 'react'
 import { Wallet, TrendingUp, TrendingDown, DollarSign, Package, PlusCircle, History } from 'lucide-react'
 import { useSales, useProducts, useExpenses } from '@/hooks/use-collections'
 import { landedCost } from '@/lib/types'
+import { ExpenseFormModal } from './expense-form-modal'
+import { CashClosingModal } from './cash-closing-modal'
 
 export function DashboardView({ rate = 794.99 }: { rate?: number }) {
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('today')
+  const [showExpenseModal, setShowExpenseModal] = useState(false)
+  const [showClosingModal, setShowClosingModal] = useState(false)
 
   const { sales = [] } = useSales()
   const { products = [] } = useProducts()
@@ -31,7 +35,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     )
   }
 
-  // Helper de fecha
+  // Helper de timestamp
   const getTimestamp = (item: any): number => {
     const raw = item?.timestamp ?? item?.createdAt ?? item?.date ?? item?.fecha
     if (!raw) return Date.now()
@@ -42,7 +46,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     return isNaN(parsed) ? Date.now() : parsed
   }
 
-  // Filtrado por período
+  // Filtrar ventas por período
   const filteredSales = useMemo(() => {
     const now = new Date()
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
@@ -61,6 +65,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     })
   }, [sales, period])
 
+  // Filtrar gastos por período
   const filteredExpenses = useMemo(() => {
     const now = new Date()
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
@@ -79,7 +84,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     })
   }, [expenses, period])
 
-  // Métricas financieras
+  // Métricas financieras calculadas
   const metrics = useMemo(() => {
     let totalSalesUSD = 0
     let cashUSD = 0
@@ -297,13 +302,10 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         </div>
       </div>
 
-      {/* BOTONES DE ACCIÓN RÁPIDA: REGISTRAR GASTO Y CIERRE */}
+      {/* BOTONES DE ACCIÓN: REGISTRAR GASTO Y CIERRE DE CAJA */}
       <div className="mt-2 grid grid-cols-2 gap-2">
         <button
-          onClick={() => {
-            const btn = document.querySelector('[data-expense-trigger]') as HTMLButtonElement
-            if (btn) btn.click()
-          }}
+          onClick={() => setShowExpenseModal(true)}
           className="flex items-center justify-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 py-2.5 px-3 text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/20 active:scale-[0.98]"
         >
           <PlusCircle className="h-4 w-4" />
@@ -311,16 +313,30 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         </button>
 
         <button
-          onClick={() => {
-            const btn = document.querySelector('[data-closing-trigger]') as HTMLButtonElement
-            if (btn) btn.click()
-          }}
+          onClick={() => setShowClosingModal(true)}
           className="flex items-center justify-center gap-2 rounded-xl border border-border/60 bg-secondary/60 py-2.5 px-3 text-xs font-semibold text-foreground transition-colors hover:bg-secondary active:scale-[0.98]"
         >
           <History className="h-4 w-4" />
           Cierre de Caja
         </button>
       </div>
+
+      {/* MODALES CONECTADOS */}
+      {showExpenseModal && (
+        <ExpenseFormModal
+          open={showExpenseModal}
+          onClose={() => setShowExpenseModal(false)}
+          rate={rateBCV}
+        />
+      )}
+
+      {showClosingModal && (
+        <CashClosingModal
+          open={showClosingModal}
+          onClose={() => setShowClosingModal(false)}
+          rate={rateBCV}
+        />
+      )}
     </div>
   )
 }
