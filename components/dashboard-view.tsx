@@ -2,28 +2,28 @@
 
 import { useState, useMemo } from 'react'
 import { Wallet, TrendingUp, TrendingDown, DollarSign, Package } from 'lucide-react'
-import { useSales, useProducts } from '@/hooks/use-collections'
+import { useSales, useProducts, useExpenses } from '@/hooks/use-collections'
 
 export function DashboardView({ rate = 794.99 }: { rate?: number }) {
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('today')
 
   const { sales = [] } = useSales()
   const { products = [] } = useProducts()
+  const { expenses = [] } = useExpenses()
 
   const rateBCV = typeof rate === 'number' && rate > 0 ? rate : 794.99
 
-  // Filtrar ventas según el período seleccionado
+  // Filtrar ventas por período
   const filteredSales = useMemo(() => {
     const now = new Date()
     const todayStr = now.toDateString()
 
     return (sales || []).filter((s: any) => {
-      // Ignorar anuladas
       if (s.status === 'cancelled' || s.voided || s.anulada || s.anulado) return false
       if (period === 'all') return true
 
       const rawDate = s.timestamp || s.createdAt || s.date || s.fecha
-      const saleDate = rawDate ? new Date(rawDate) : new Date()
+      const saleDate = rawDate?.toDate ? rawDate.toDate() : new Date(rawDate || Date.now())
 
       if (period === 'today') {
         return saleDate.toDateString() === todayStr
@@ -40,6 +40,32 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     })
   }, [sales, period])
 
+  // Filtrar gastos por período
+  const filteredExpenses = useMemo(() => {
+    const now = new Date()
+    const todayStr = now.toDateString()
+
+    return (expenses || []).filter((e: any) => {
+      if (period === 'all') return true
+
+      const rawDate = e.timestamp || e.createdAt || e.date || e.fecha
+      const expDate = rawDate?.toDate ? rawDate.toDate() : new Date(rawDate || Date.now())
+
+      if (period === 'today') {
+        return expDate.toDateString() === todayStr
+      }
+      if (period === 'week') {
+        const weekAgo = new Date(now)
+        weekAgo.setDate(now.getDate() - 7)
+        return expDate >= weekAgo
+      }
+      if (period === 'month') {
+        return expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear()
+      }
+      return true
+    })
+  }, [expenses, period])
+
   // Métricas financieras calculadas
   const metrics = useMemo(() => {
     let totalSalesUSD = 0
@@ -48,7 +74,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     let digitalUSD = 0
 
     filteredSales.forEach((s: any) => {
-      // Tomar el monto en USD de cualquier posible clave
       const amountUSD = Number(s.totalUSD ?? s.total ?? s.amount ?? s.monto ?? 0)
       totalSalesUSD += amountUSD
 
@@ -63,7 +88,22 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       }
     })
 
-    // Valor total del inventario
+    let totalExpensesUSD = 0
+    filteredExpenses.forEach((e: any) => {
+      const expAmountUSD = Number(e.amountUSD ?? e.amount ?? e.monto ?? e.totalUSD ?? 0)
+      totalExpensesUSD += expAmountUSD
+
+      const method = String(e.paymentMethod || e.method || e.metodo || '').toLowerCase()
+      if (method.includes('bs') || method.includes('pago') || method.includes('movil')) {
+        const expAmountBS = Number(e.amountBS ?? e.montoBS ?? (expAmountUSD * rateBCV))
+        bsTotal -= expAmountBS
+      } else if (method.includes('binance') || method.includes('zelle') || method.includes('usdt')) {
+        digitalUSD -= expAmountUSD
+      } else {
+        cashUSD -= expAmountUSD
+      }
+    })
+
     const totalInventoryValue = (products || []).reduce((acc: number, p: any) => {
       const cost = Number(p.costPrice ?? p.cost ?? p.price ?? 0)
       const stock = Number(p.stock ?? 0)
@@ -72,18 +112,21 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
 
     const totalDisponibleUSD = cashUSD + (bsTotal / rateBCV) + digitalUSD
     const totalDisponibleBs = totalDisponibleUSD * rateBCV
+    const gananciaNeta = totalSalesUSD - totalExpensesUSD
 
     return {
       totalSalesUSD,
-      cashUSD,
-      bsTotal,
-      digitalUSD,
-      totalDisponibleUSD,
-      totalDisponibleBs,
+      totalExpensesUSD,
+      gananciaNeta,
+      cashUSD: Math.max(0, cashUSD),
+      bsTotal: Math.max(0, bsTotal),
+      digitalUSD: Math.max(0, digitalUSD),
+      totalDisponibleUSD: Math.max(0, totalDisponibleUSD),
+      totalDisponibleBs: Math.max(0, totalDisponibleBs),
       totalInventoryValue,
       salesCount: filteredSales.length
     }
-  }, [filteredSales, products, rateBCV])
+  }, [filteredSales, filteredExpenses, products, rateBCV])
 
   return (
     <div className="flex flex-col gap-4 pb-24">
@@ -181,8 +224,10 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-xs font-medium text-muted-foreground">Gastos Operativos</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold font-mono text-rose-400">$0.00</p>
-            <p className="text-[11px] text-muted-foreground font-mono">Bs 0,00</p>
+            <p className="text-lg font-bold font-mono text-rose-400">${metrics.totalExpensesUSD.toFixed(2)}</p>
+            <p className="text-[11px] text-muted-foreground font-mono">
+              Bs {(metrics.totalExpensesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+            </p>
           </div>
         </div>
 
@@ -193,9 +238,11 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-xs font-medium text-muted-foreground">Ganancia Neta Real</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold font-mono text-emerald-400">${metrics.totalSalesUSD.toFixed(2)}</p>
+            <p className={`text-lg font-bold font-mono ${metrics.gananciaNeta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              ${metrics.gananciaNeta.toFixed(2)}
+            </p>
             <p className="text-[11px] text-muted-foreground font-mono">
-              Bs {(metrics.totalSalesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+              Bs {(metrics.gananciaNeta * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
             <p className="mt-1 text-[10px] text-muted-foreground">Margen – gastos</p>
           </div>
