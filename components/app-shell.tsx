@@ -6,7 +6,6 @@ import { useRates } from '@/hooks/use-rates'
 import { useSession } from '@/context/session-context'
 import { BrandLogo } from './brand-logo'
 import { LiveRatesWidget } from './live-rates-widget'
-import { SegmentedPills } from './segmented-pills'
 import { InventoryView } from './inventory-view'
 import { SalesView } from './sales-view'
 import { DashboardView } from './dashboard-view'
@@ -16,6 +15,8 @@ import { CustomersView } from './customers-view'
 import { ReceivablesView } from './receivables-view'
 
 type Tab = 'sales' | 'inventory' | 'clients' | 'admin'
+type ClientSub = 'directory' | 'receivables'
+type AdminSub = 'finance' | 'audit' | 'backups'
 
 const TABS: { id: Tab; label: string; icon: typeof Zap }[] = [
   { id: 'sales', label: 'Ventas', icon: Zap },
@@ -24,96 +25,124 @@ const TABS: { id: Tab; label: string; icon: typeof Zap }[] = [
   { id: 'admin', label: 'Administración', icon: Wallet },
 ]
 
-type ClientSub = 'directory' | 'receivables'
-type AdminSub = 'finance' | 'audit' | 'backups'
-
 export function AppShell() {
-  const rates = useRates()
+  const [currentTab, setCurrentTab] = useState<Tab>('sales')
+  const [clientSubTab, setClientSubTab] = useState<ClientSub>('directory')
+  const [adminSubTab, setAdminSubTab] = useState<AdminSub>('finance')
+  
+  const { rates, loading: ratesLoading } = useRates()
   const { activeUser } = useSession()
-  const [tab, setTab] = useState<Tab>('sales')
-  const [clientSub, setClientSub] = useState<ClientSub>('directory')
-  const [adminSub, setAdminSub] = useState<AdminSub>('finance')
 
   return (
-    <div className="mx-auto flex min-h-[100dvh] max-w-md flex-col">
-      {/* Top bar */}
-      <header className="sticky top-0 z-20 flex flex-col gap-3 border-b border-border/40 bg-background/80 px-5 py-3 backdrop-blur-md">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <BrandLogo size={38} />
-            <div className="leading-tight">
-              <div className="text-sm font-semibold">Rebell Tattoo Supply</div>
-              <div className="text-xs text-muted-foreground">
-                Perfil activo: <span className="font-semibold text-emerald-400">{activeUser}</span>
-              </div>
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col pb-20 select-none">
+      {/* Header */}
+      <header className="sticky top-0 z-40 bg-neutral-950/80 backdrop-blur-md border-b border-neutral-800/60 px-4 py-3">
+        <div className="max-w-md mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <BrandLogo />
+            <div>
+              <h1 className="text-sm font-semibold text-white tracking-wide">
+                Rebell Tattoo Supply
+              </h1>
+              <p className="text-xs text-neutral-400">
+                Perfil activo · <span className="text-neutral-200 font-medium">{activeUser}</span>
+              </p>
             </div>
           </div>
         </div>
       </header>
 
-      {/* Live rates */}
-      <div className="px-5 pt-4">
-        <LiveRatesWidget rates={rates} />
-      </div>
+      {/* Main Content */}
+      <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4">
+        <LiveRatesWidget rates={rates} loading={ratesLoading} />
 
-      {/* Main content */}
-      <main className="flex-1 px-5 pt-4">
-        {tab === 'sales' && <SalesView rate={rates.bcv} />}
-        {tab === 'inventory' && <InventoryView rate={rates.bcv} />}
-        {tab === 'clients' && (
-          <div className="flex flex-col gap-4">
-            <SegmentedPills
-              options={[
-                { id: 'directory', label: 'Directorio' },
-                { id: 'receivables', label: 'Cuentas por Cobrar' },
-              ]}
-              value={clientSub}
-              onChange={(v) => setClientSub(v as ClientSub)}
-            />
-            {clientSub === 'directory' && <CustomersView rate={rates.bcv} />}
-            {clientSub === 'receivables' && <ReceivablesView rate={rates.bcv} />}
+        {currentTab === 'sales' && <SalesView />}
+        {currentTab === 'inventory' && <InventoryView />}
+        {currentTab === 'clients' && (
+          <div className="space-y-4">
+            <div className="flex bg-neutral-900 p-1 rounded-xl border border-neutral-800">
+              <button
+                onClick={() => setClientSubTab('directory')}
+                className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                  clientSubTab === 'directory'
+                    ? 'bg-neutral-800 text-white shadow-sm'
+                    : 'text-neutral-400 hover:text-neutral-200'
+                }`}
+              >
+                Directorio
+              </button>
+              <button
+                onClick={() => setClientSubTab('receivables')}
+                className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                  clientSubTab === 'receivables'
+                    ? 'bg-neutral-800 text-white shadow-sm'
+                    : 'text-neutral-400 hover:text-neutral-200'
+                }`}
+              >
+                Cuentas por cobrar
+              </button>
+            </div>
+            {clientSubTab === 'directory' ? <CustomersView /> : <ReceivablesView />}
           </div>
         )}
-        {tab === 'admin' && (
-          <div className="flex flex-col gap-4">
-            <SegmentedPills
-              options={[
-                { id: 'finance', label: 'Finanzas y Caja' },
-                { id: 'audit', label: 'Auditoría' },
-                { id: 'backups', label: 'Respaldos' },
-              ]}
-              value={adminSub}
-              onChange={(v) => setAdminSub(v as AdminSub)}
-            />
-            {adminSub === 'finance' && <DashboardView rate={rates.bcv} />}
-            {adminSub === 'audit' && <AuditView />}
-            {adminSub === 'backups' && <SettingsView />}
+        {currentTab === 'admin' && (
+          <div className="space-y-4">
+            <div className="flex bg-neutral-900 p-1 rounded-xl border border-neutral-800">
+              <button
+                onClick={() => setAdminSubTab('finance')}
+                className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                  adminSubTab === 'finance'
+                    ? 'bg-neutral-800 text-white shadow-sm'
+                    : 'text-neutral-400 hover:text-neutral-200'
+                }`}
+              >
+                Finanzas
+              </button>
+              <button
+                onClick={() => setAdminSubTab('audit')}
+                className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                  adminSubTab === 'audit'
+                    ? 'bg-neutral-800 text-white shadow-sm'
+                    : 'text-neutral-400 hover:text-neutral-200'
+                }`}
+              >
+                Auditoría
+              </button>
+              <button
+                onClick={() => setAdminSubTab('backups')}
+                className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                  adminSubTab === 'backups'
+                    ? 'bg-neutral-800 text-white shadow-sm'
+                    : 'text-neutral-400 hover:text-neutral-200'
+                }`}
+              >
+                Ajustes
+              </button>
+            </div>
+            {adminSubTab === 'finance' && <DashboardView />}
+            {adminSubTab === 'audit' && <AuditView />}
+            {adminSubTab === 'backups' && <SettingsView />}
           </div>
         )}
       </main>
 
-      {/* Bottom nav */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 mx-auto max-w-md border-t border-border/40 bg-background/90 backdrop-blur-lg">
-        <div className="flex items-stretch justify-around gap-1 px-3 pb-[env(safe-area-inset-bottom)] pt-1.5">
+      {/* Bottom Navigation */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-neutral-950/90 backdrop-blur-lg border-t border-neutral-800/80 px-4 py-2">
+        <div className="max-w-md mx-auto grid grid-cols-4 gap-1">
           {TABS.map(({ id, label, icon: Icon }) => {
-            const active = tab === id
+            const isActive = currentTab === id
             return (
               <button
                 key={id}
-                onClick={() => setTab(id)}
-                aria-pressed={active}
-                className={`flex flex-1 flex-col items-center gap-1.5 rounded-xl py-2 text-[11px] font-medium transition-colors ${
-                  active ? 'text-emerald-400' : 'text-muted-foreground'
+                onClick={() => setCurrentTab(id)}
+                className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition-all ${
+                  isActive
+                    ? 'text-emerald-400 font-medium'
+                    : 'text-neutral-400 hover:text-neutral-200'
                 }`}
               >
-                <span
-                  className={`flex h-9 w-full max-w-[64px] items-center justify-center rounded-2xl transition-colors ${
-                    active ? 'bg-emerald-500/15' : ''
-                  }`}
-                >
-                  <Icon className="h-5 w-5" />
-                </span>
-                {label}
+                <Icon className={`w-5 h-5 ${isActive ? 'stroke-[2.5px]' : 'stroke-2'}`} />
+                <span className="text-[10px] mt-1">{label}</span>
               </button>
             )
           })}
