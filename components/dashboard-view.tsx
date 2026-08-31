@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { Wallet, TrendingUp, TrendingDown, DollarSign, Package } from 'lucide-react'
 import { useSales, useProducts, useExpenses } from '@/hooks/use-collections'
+import { landedCost } from '@/lib/types'
 
 export function DashboardView({ rate = 794.99 }: { rate?: number }) {
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('today')
@@ -13,60 +14,54 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
 
   const rateBCV = typeof rate === 'number' && rate > 0 ? rate : 794.99
 
-  // Filtrar ventas por período
+  // Helper para obtener timestamp en milisegundos
+  const getTimestamp = (item: any): number => {
+    const raw = item?.timestamp ?? item?.createdAt ?? item?.date ?? item?.fecha
+    if (!raw) return Date.now()
+    if (typeof raw === 'number') return raw
+    if (raw?.toMillis) return raw.toMillis()
+    if (raw?.toDate) return raw.toDate().getTime()
+    const parsed = new Date(raw).getTime()
+    return isNaN(parsed) ? Date.now() : parsed
+  }
+
+  // Filtrado por período
   const filteredSales = useMemo(() => {
     const now = new Date()
-    const todayStr = now.toDateString()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const startOfWeek = startOfToday - 7 * 24 * 60 * 60 * 1000
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
 
     return (sales || []).filter((s: any) => {
-      if (s.status === 'cancelled' || s.voided || s.anulada || s.anulado) return false
+      if (s.status === 'cancelled' || s.voided || s.anulada || s.anulado || s.isVoided) return false
       if (period === 'all') return true
 
-      const rawDate = s.timestamp || s.createdAt || s.date || s.fecha
-      const saleDate = rawDate?.toDate ? rawDate.toDate() : new Date(rawDate || Date.now())
-
-      if (period === 'today') {
-        return saleDate.toDateString() === todayStr
-      }
-      if (period === 'week') {
-        const weekAgo = new Date(now)
-        weekAgo.setDate(now.getDate() - 7)
-        return saleDate >= weekAgo
-      }
-      if (period === 'month') {
-        return saleDate.getMonth() === now.getMonth() && saleDate.getFullYear() === now.getFullYear()
-      }
+      const ts = getTimestamp(s)
+      if (period === 'today') return ts >= startOfToday
+      if (period === 'week') return ts >= startOfWeek
+      if (period === 'month') return ts >= startOfMonth
       return true
     })
   }, [sales, period])
 
-  // Filtrar gastos por período
   const filteredExpenses = useMemo(() => {
     const now = new Date()
-    const todayStr = now.toDateString()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const startOfWeek = startOfToday - 7 * 24 * 60 * 60 * 1000
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
 
     return (expenses || []).filter((e: any) => {
       if (period === 'all') return true
 
-      const rawDate = e.timestamp || e.createdAt || e.date || e.fecha
-      const expDate = rawDate?.toDate ? rawDate.toDate() : new Date(rawDate || Date.now())
-
-      if (period === 'today') {
-        return expDate.toDateString() === todayStr
-      }
-      if (period === 'week') {
-        const weekAgo = new Date(now)
-        weekAgo.setDate(now.getDate() - 7)
-        return expDate >= weekAgo
-      }
-      if (period === 'month') {
-        return expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear()
-      }
+      const ts = getTimestamp(e)
+      if (period === 'today') return ts >= startOfToday
+      if (period === 'week') return ts >= startOfWeek
+      if (period === 'month') return ts >= startOfMonth
       return true
     })
   }, [expenses, period])
 
-  // Métricas financieras calculadas
+  // Métricas financieras calculadas con SalePayments
   const metrics = useMemo(() => {
     let totalSalesUSD = 0
     let cashUSD = 0
@@ -74,40 +69,66 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     let digitalUSD = 0
 
     filteredSales.forEach((s: any) => {
-      const amountUSD = Number(s.totalUSD ?? s.total ?? s.amount ?? s.monto ?? 0)
-      totalSalesUSD += amountUSD
+      // 1. Total de la venta
+      let saleTotalUSD = Number(s.totalUSD ?? s.total ?? s.subtotal ?? 0)
+      
+      // Si el total viene calculado desde los items
+      if (!saleTotalUSD && Array.isArray(s.items)) {
+        saleTotalUSD = s.items.reduce((acc: number, it: any) => {
+          return acc + (Number(it.unitPrice || it.price || 0) * Number(it.quantity || 1))
+        }, 0)
+      }
+      totalSalesUSD += saleTotalUSD
 
-      const method = String(s.paymentMethod || s.method || s.metodo || '').toLowerCase()
-      if (method.includes('bs') || method.includes('pago') || method.includes('movil') || method.includes('transf')) {
-        const amountBS = Number(s.totalBS ?? s.montoBS ?? (amountUSD * rateBCV))
-        bsTotal += amountBS
-      } else if (method.includes('binance') || method.includes('zelle') || method.includes('usdt')) {
-        digitalUSD += amountUSD
+      // 2. Desglose exacto de pagos (SalePayments)
+      const p = s.payments || s.payment || {}
+      const efUSD = Number(p.efectivoUsd ?? s.efectivoUsd ?? 0)
+      const pMovil = Number(p.pagoMovil ?? s.pagoMovil ?? 0)
+      const transf = Number(p.transferencia ?? s.transferencia ?? 0)
+      const zelleUSD = Number(p.zelle ?? s.zelle ?? 0)
+      const binanceUSD = Number(p.binance ?? s.binance ?? 0)
+
+      const hasExplicitPayments = (efUSD + pMovil + transf + zelleUSD + binanceUSD) > 0
+
+      if (hasExplicitPayments) {
+        cashUSD += efUSD
+        bsTotal += (pMovil + transf)
+        digitalUSD += (zelleUSD + binanceUSD)
       } else {
-        cashUSD += amountUSD
+        // Fallback según método tradicional si no tiene objeto payments
+        const method = String(s.paymentMethod || s.method || '').toLowerCase()
+        if (method.includes('bs') || method.includes('pago') || method.includes('movil') || method.includes('transf')) {
+          bsTotal += Number(s.totalBS ?? s.montoBS ?? (saleTotalUSD * rateBCV))
+        } else if (method.includes('binance') || method.includes('zelle') || method.includes('usdt')) {
+          digitalUSD += saleTotalUSD
+        } else {
+          cashUSD += saleTotalUSD
+        }
       }
     })
 
+    // 3. Gastos
     let totalExpensesUSD = 0
     filteredExpenses.forEach((e: any) => {
-      const expAmountUSD = Number(e.amountUSD ?? e.amount ?? e.monto ?? e.totalUSD ?? 0)
-      totalExpensesUSD += expAmountUSD
+      const expUSD = Number(e.amountUSD ?? e.amount ?? e.monto ?? e.totalUSD ?? 0)
+      totalExpensesUSD += expUSD
 
-      const method = String(e.paymentMethod || e.method || e.metodo || '').toLowerCase()
+      const method = String(e.paymentMethod || e.method || '').toLowerCase()
       if (method.includes('bs') || method.includes('pago') || method.includes('movil')) {
-        const expAmountBS = Number(e.amountBS ?? e.montoBS ?? (expAmountUSD * rateBCV))
-        bsTotal -= expAmountBS
+        const expBS = Number(e.amountBS ?? e.montoBS ?? (expUSD * rateBCV))
+        bsTotal -= expBS
       } else if (method.includes('binance') || method.includes('zelle') || method.includes('usdt')) {
-        digitalUSD -= expAmountUSD
+        digitalUSD -= expUSD
       } else {
-        cashUSD -= expAmountUSD
+        cashUSD -= expUSD
       }
     })
 
+    // 4. Inventario
     const totalInventoryValue = (products || []).reduce((acc: number, p: any) => {
-      const cost = Number(p.costPrice ?? p.cost ?? p.price ?? 0)
+      const unitCost = landedCost ? landedCost(p) : Number(p.costPrice ?? p.cost ?? p.price ?? 0)
       const stock = Number(p.stock ?? 0)
-      return acc + (cost * stock)
+      return acc + (unitCost * stock)
     }, 0)
 
     const totalDisponibleUSD = cashUSD + (bsTotal / rateBCV) + digitalUSD
@@ -130,7 +151,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
 
   return (
     <div className="flex flex-col gap-4 pb-24">
-      {/* Título de la sección */}
+      {/* Encabezado */}
       <div className="flex flex-col gap-0.5">
         <h2 className="text-base font-bold text-foreground">Panel financiero</h2>
         <p className="text-xs text-muted-foreground font-mono">Tasa BCV: Bs {rateBCV.toFixed(2)} / $</p>
@@ -183,7 +204,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
           </span>
         </div>
 
-        {/* Desglose de métodos */}
+        {/* Desglose real por métodos */}
         <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border/40 pt-3 text-[11px]">
           <div>
             <p className="text-[10px] text-muted-foreground">Efectivo $</p>
