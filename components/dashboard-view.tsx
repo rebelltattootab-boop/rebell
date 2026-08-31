@@ -18,49 +18,54 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
 
   const rateBCV = typeof rate === 'number' && rate > 0 ? rate : 794.99
 
-  // Helper para detectar anuladas
-  const isSaleVoided = (s: any): boolean => {
+  // Helper para detectar anulaciones
+  const isVoided = (item: any): boolean => {
     return Boolean(
-      s.voided === true ||
-      s.isVoided === true ||
-      s.anulado === true ||
-      s.anulada === true ||
-      s.voidedAt ||
-      s.anuladoAt ||
-      s.voidReason ||
-      s.status === 'voided' ||
-      s.status === 'cancelled' ||
-      s.status === 'anulada' ||
-      s.status === 'anulado'
+      item.voided === true ||
+      item.isVoided === true ||
+      item.anulado === true ||
+      item.anulada === true ||
+      item.voidedAt ||
+      item.anuladoAt ||
+      item.voidReason ||
+      item.status === 'voided' ||
+      item.status === 'cancelled' ||
+      item.status === 'anulada' ||
+      item.status === 'anulado'
     )
   }
 
-  // Helper de timestamp
-  const getTimestamp = (item: any): number => {
-    const raw = item?.timestamp ?? item?.createdAt ?? item?.date ?? item?.fecha
-    if (!raw) return Date.now()
-    if (typeof raw === 'number') return raw
-    if (raw?.toMillis) return raw.toMillis()
-    if (raw?.toDate) return raw.toDate().getTime()
-    const parsed = new Date(raw).getTime()
-    return isNaN(parsed) ? Date.now() : parsed
+  // Parseo universal de fechas para Firestore
+  const getItemDate = (item: any): Date => {
+    const raw = item?.createdAt ?? item?.timestamp ?? item?.date ?? item?.fecha
+    if (!raw) return new Date()
+    if (typeof raw?.toDate === 'function') return raw.toDate()
+    if (typeof raw?.toMillis === 'function') return new Date(raw.toMillis())
+    if (typeof raw === 'number') return new Date(raw)
+    if (raw?.seconds) return new Date(raw.seconds * 1000)
+    const parsed = new Date(raw)
+    return isNaN(parsed.getTime()) ? new Date() : parsed
   }
 
   // Filtrar ventas por período
   const filteredSales = useMemo(() => {
     const now = new Date()
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-    const startOfWeek = startOfToday - 7 * 24 * 60 * 60 * 1000
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+    const todayStr = now.toDateString()
 
     return (sales || []).filter((s: any) => {
-      if (isSaleVoided(s)) return false
+      if (isVoided(s)) return false
       if (period === 'all') return true
 
-      const ts = getTimestamp(s)
-      if (period === 'today') return ts >= startOfToday
-      if (period === 'week') return ts >= startOfWeek
-      if (period === 'month') return ts >= startOfMonth
+      const saleDate = getItemDate(s)
+      if (period === 'today') return saleDate.toDateString() === todayStr
+      if (period === 'week') {
+        const weekAgo = new Date(now)
+        weekAgo.setDate(now.getDate() - 7)
+        return saleDate >= weekAgo
+      }
+      if (period === 'month') {
+        return saleDate.getMonth() === now.getMonth() && saleDate.getFullYear() === now.getFullYear()
+      }
       return true
     })
   }, [sales, period])
@@ -68,18 +73,22 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
   // Filtrar gastos por período
   const filteredExpenses = useMemo(() => {
     const now = new Date()
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-    const startOfWeek = startOfToday - 7 * 24 * 60 * 60 * 1000
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+    const todayStr = now.toDateString()
 
     return (expenses || []).filter((e: any) => {
-      if (isSaleVoided(e)) return false
+      if (isVoided(e)) return false
       if (period === 'all') return true
 
-      const ts = getTimestamp(e)
-      if (period === 'today') return ts >= startOfToday
-      if (period === 'week') return ts >= startOfWeek
-      if (period === 'month') return ts >= startOfMonth
+      const expDate = getItemDate(e)
+      if (period === 'today') return expDate.toDateString() === todayStr
+      if (period === 'week') {
+        const weekAgo = new Date(now)
+        weekAgo.setDate(now.getDate() - 7)
+        return expDate >= weekAgo
+      }
+      if (period === 'month') {
+        return expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear()
+      }
       return true
     })
   }, [expenses, period])
@@ -126,13 +135,14 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       }
     })
 
+    // Sumar Gastos
     let totalExpensesUSD = 0
     filteredExpenses.forEach((e: any) => {
-      const expUSD = Number(e.amountUSD ?? e.amount ?? e.monto ?? e.totalUSD ?? 0)
+      const expUSD = Number(e.amount ?? e.amountUSD ?? e.monto ?? e.totalUSD ?? e.total ?? 0)
       totalExpensesUSD += expUSD
 
-      const method = String(e.paymentMethod || e.method || '').toLowerCase()
-      if (method.includes('bs') || method.includes('pago') || method.includes('movil')) {
+      const method = String(e.method || e.paymentMethod || e.metodo || '').toLowerCase()
+      if (method.includes('bs') || method.includes('pago') || method.includes('movil') || method.includes('punto') || method.includes('transf')) {
         const expBS = Number(e.amountBS ?? e.montoBS ?? (expUSD * rateBCV))
         bsTotal -= expBS
       } else if (method.includes('binance') || method.includes('zelle') || method.includes('usdt')) {
@@ -156,11 +166,11 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       totalSalesUSD,
       totalExpensesUSD,
       gananciaNeta,
-      cashUSD: Math.max(0, cashUSD),
-      bsTotal: Math.max(0, bsTotal),
-      digitalUSD: Math.max(0, digitalUSD),
-      totalDisponibleUSD: Math.max(0, totalDisponibleUSD),
-      totalDisponibleBs: Math.max(0, totalDisponibleBs),
+      cashUSD,
+      bsTotal,
+      digitalUSD,
+      totalDisponibleUSD,
+      totalDisponibleBs,
       totalInventoryValue,
       salesCount: filteredSales.length
     }
@@ -321,7 +331,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         </button>
       </div>
 
-      {/* MODAL DE GASTO CON ONCLOSE Y ONSAVED */}
+      {/* MODAL DE GASTO */}
       {showExpenseModal && (
         <ExpenseFormModal
           rate={rateBCV}
