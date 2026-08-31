@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { 
   Wallet, 
   TrendingUp, 
@@ -11,7 +11,9 @@ import {
   History, 
   Trash2, 
   Calendar,
-  ReceiptText
+  ReceiptText,
+  Shield,
+  X
 } from 'lucide-react'
 import { doc, updateDoc, addDoc, collection } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
@@ -27,7 +29,18 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('today')
   const [showExpenseModal, setShowExpenseModal] = useState(false)
   const [showClosingModal, setShowClosingModal] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
+  
+  // Estado para el modal de PIN nativo
+  const [expenseToVoid, setExpenseToVoid] = useState<any | null>(null)
+  const [pinDigits, setPinDigits] = useState(['', '', '', ''])
+  const [pinError, setPinError] = useState('')
+  const [isVerifying, setIsVerifying] = useState(false)
+  const inputRefs = [
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null)
+  ]
 
   const { sales = [] } = useSales()
   const { products = [] } = useProducts()
@@ -95,58 +108,95 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     })
   }, [expenses, period, timeLimits])
 
-  // Borrado con solicitud de PIN
-  const handleDeleteExpense = async (exp: any) => {
-    const amount = Number(exp.amountUsd ?? exp.amountUSD ?? exp.amount ?? 0)
-    
-    // 1. Pedir PIN
-    const enteredPin = window.prompt(`Autorización requerida para anular gasto de $${amount.toFixed(2)}.\nIntroduce el PIN de 4 dígitos:`)
-    if (!enteredPin) return
+  // Abrir modal de confirmación con PIN
+  const handleOpenPinModal = (exp: any) => {
+    setExpenseToVoid(exp)
+    setPinDigits(['', '', '', ''])
+    setPinError('')
+    setTimeout(() => {
+      inputRefs[0].current?.focus()
+    }, 100)
+  }
 
-    // 2. Validar PIN
-    let isValid = false
-    try {
-      if (typeof verifyPin === 'function') {
-        isValid = await verifyPin(enteredPin.trim())
-      } else {
-        isValid = enteredPin.trim() === '1234'
-      }
-    } catch {
-      isValid = enteredPin.trim() === '1234'
+  // Cerrar modal de PIN
+  const handleClosePinModal = () => {
+    setExpenseToVoid(null)
+    setPinDigits(['', '', '', ''])
+    setPinError('')
+  }
+
+  // Manejo de inputs del PIN de 4 dígitos
+  const handleDigitChange = (index: number, val: string) => {
+    const digit = val.slice(-1)
+    if (!/^\d*$/.test(digit)) return
+
+    const newDigits = [...pinDigits]
+    newDigits[index] = digit
+    setPinDigits(newDigits)
+    setPinError('')
+
+    if (digit && index < 3) {
+      inputRefs[index + 1].current?.focus()
     }
+  }
 
-    if (!isValid) {
-      alert('PIN incorrecto. No se autorizó la anulación del gasto.')
+  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace' && !pinDigits[index] && index > 0) {
+      inputRefs[index - 1].current?.focus()
+    }
+  }
+
+  // Confirmar y procesar anulación de gasto con PIN
+  const handleConfirmVoid = async () => {
+    const fullPin = pinDigits.join('')
+    if (fullPin.length < 4) {
+      setPinError('Introduce los 4 dígitos del PIN')
       return
     }
 
-    if (!db) return
+    if (!expenseToVoid || !db) return
 
     try {
-      setDeletingId(exp.id)
-      
-      // 3. Marcar como anulado
-      await updateDoc(doc(db, 'expenses', exp.id), {
+      setIsVerifying(true)
+      let isValid = false
+      if (typeof verifyPin === 'function') {
+        isValid = await verifyPin(fullPin)
+      } else {
+        isValid = fullPin === '1234'
+      }
+
+      if (!isValid) {
+        setPinError('PIN incorrecto')
+        setIsVerifying(false)
+        return
+      }
+
+      const amount = Number(expenseToVoid.amountUsd ?? expenseToVoid.amountUSD ?? expenseToVoid.amount ?? 0)
+
+      // 1. Marcar como anulado
+      await updateDoc(doc(db, 'expenses', expenseToVoid.id), {
         status: 'void',
         voidedAt: Date.now(),
         voidedBy: activeUser,
         voidReason: 'Anulado con PIN de autorización',
       })
 
-      // 4. Registrar en auditoría
+      // 2. Registrar en auditoría
       await addDoc(collection(db, 'audit'), {
         type: 'void_expense',
-        expenseId: exp.id,
+        expenseId: expenseToVoid.id,
         amountUsd: amount,
-        category: exp.category || 'Gasto operativo',
+        category: expenseToVoid.category || 'Gasto operativo',
         reason: 'Anulado con PIN de autorización',
         user: activeUser,
         createdAt: Date.now(),
       })
+
+      handleClosePinModal()
     } catch (err: any) {
-      alert('Error al eliminar: ' + (err?.message || 'intente de nuevo'))
+      setPinError(err?.message || 'Error al procesar la anulación')
     } finally {
-      setDeletingId(null)
+      setIsVerifying(false)
     }
   }
 
@@ -368,7 +418,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         </button>
       </div>
 
-      {/* HISTORIAL DE GASTOS CON BOTÓN DE ELIMINAR Y PIN */}
+      {/* HISTORIAL DE GASTOS */}
       <div className="mt-2 flex flex-col gap-2">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-1.5">
@@ -431,10 +481,9 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
                     </div>
 
                     <button
-                      onClick={() => handleDeleteExpense(exp)}
-                      disabled={deletingId === exp.id}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/50 text-muted-foreground transition-colors hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-400 active:scale-95 disabled:opacity-50"
-                      title="Eliminar gasto (requiere PIN)"
+                      onClick={() => handleOpenPinModal(exp)}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/50 text-muted-foreground transition-colors hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-400 active:scale-95"
+                      title="Eliminar gasto"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -445,6 +494,64 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
           </div>
         )}
       </div>
+
+      {/* MODAL DE VERIFICACIÓN CON PIN (ESTILO NATIVO) */}
+      {expenseToVoid && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="w-full max-w-sm rounded-t-3xl border-t border-border/60 bg-zinc-950 p-6 shadow-2xl sm:rounded-3xl sm:border">
+            {/* Header del Modal */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300">
+                  <Shield className="h-5 w-5" />
+                </div>
+                <div className="flex flex-col">
+                  <h3 className="text-sm font-bold text-white">Verificación</h3>
+                  <p className="text-xs text-zinc-400">Acción protegida por PIN</p>
+                </div>
+              </div>
+
+              <button
+                onClick={handleClosePinModal}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-900 text-zinc-400 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Inputs de las 4 casillas */}
+            <div className="mt-8 flex justify-center gap-3">
+              {[0, 1, 2, 3].map((idx) => (
+                <input
+                  key={idx}
+                  ref={inputRefs[idx]}
+                  type="password"
+                  maxLength={1}
+                  inputMode="numeric"
+                  value={pinDigits[idx]}
+                  onChange={(e) => handleDigitChange(idx, e.target.value)}
+                  onKeyDown={(e) => handleKeyDown(idx, e)}
+                  className="h-14 w-12 rounded-2xl border border-zinc-800 bg-zinc-900 text-center text-xl font-bold text-white focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                />
+              ))}
+            </div>
+
+            {/* Mensaje de error si falla */}
+            {pinError && (
+              <p className="mt-3 text-center text-xs font-medium text-rose-400">{pinError}</p>
+            )}
+
+            {/* Botón Confirmar */}
+            <button
+              onClick={handleConfirmVoid}
+              disabled={isVerifying || pinDigits.join('').length < 4}
+              className="mt-8 w-full rounded-2xl bg-zinc-200 py-3.5 text-center text-sm font-bold text-zinc-950 transition-all hover:bg-white active:scale-[0.98] disabled:opacity-40"
+            >
+              {isVerifying ? 'Verificando...' : 'Confirmar'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* MODAL GASTO */}
       {showExpenseModal && (
