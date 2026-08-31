@@ -9,21 +9,34 @@ interface SessionContextType {
   setActiveUser: (user: ActiveUser) => void
 }
 
-const SessionContext = createContext<SessionContextType | undefined>(undefined)
+const SessionContext = createContext<SessionContextType>({
+  activeUser: 'José',
+  setActiveUser: () => {},
+})
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [activeUser, setActiveUserState] = useState<ActiveUser>('José')
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
-    const saved = localStorage.getItem('active_user') as ActiveUser | null
-    if (saved === 'José' || saved === 'Yefferson') {
-      setActiveUserState(saved)
+    setMounted(true)
+    try {
+      const saved = localStorage.getItem('active_user') as ActiveUser | null
+      if (saved === 'José' || saved === 'Yefferson') {
+        setActiveUserState(saved)
+      }
+    } catch {
+      // Ignorar errores de acceso a almacenamiento
     }
   }, [])
 
   const setActiveUser = (user: ActiveUser) => {
     setActiveUserState(user)
-    localStorage.setItem('active_user', user)
+    try {
+      localStorage.setItem('active_user', user)
+    } catch {
+      // Ignorar errores de almacenamiento
+    }
   }
 
   return (
@@ -34,9 +47,5 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function useSession() {
-  const context = useContext(SessionContext)
-  if (!context) {
-    throw new Error('useSession must be used within a SessionProvider')
-  }
-  return context
+  return useContext(SessionContext)
 }
