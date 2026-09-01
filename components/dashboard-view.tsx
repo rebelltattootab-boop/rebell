@@ -77,33 +77,118 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     return { startOfToday, startOfWeek, startOfMonth }
   }, [])
 
-  // Ventas filtradas
-  const filteredSales = useMemo(() => {
-    return (sales || []).filter((s: any) => {
-      if (isVoided(s)) return false
-      if (period === 'all') return true
+  // Ventas no anuladas (Globales)
+  const activeSales = useMemo(() => {
+    return (sales || []).filter((s: any) => !isVoided(s))
+  }, [sales])
 
+  // Gastos no anulados (Globales)
+  const activeExpenses = useMemo(() => {
+    return (expenses || []).filter((e: any) => !isVoided(e))
+  }, [expenses])
+
+  // Ventas filtradas por período
+  const filteredSales = useMemo(() => {
+    return activeSales.filter((s: any) => {
+      if (period === 'all') return true
       const ms = getMillis(s)
       if (period === 'today') return ms >= timeLimits.startOfToday
       if (period === 'week') return ms >= timeLimits.startOfWeek
       if (period === 'month') return ms >= timeLimits.startOfMonth
       return true
     })
-  }, [sales, period, timeLimits])
+  }, [activeSales, period, timeLimits])
 
-  // Gastos filtrados
+  // Gastos filtrados por período
   const filteredExpenses = useMemo(() => {
-    return (expenses || []).filter((e: any) => {
-      if (isVoided(e)) return false
+    return activeExpenses.filter((e: any) => {
       if (period === 'all') return true
-
       const ms = getMillis(e)
       if (period === 'today') return ms >= timeLimits.startOfToday
       if (period === 'week') return ms >= timeLimits.startOfWeek
       if (period === 'month') return ms >= timeLimits.startOfMonth
       return true
     })
-  }, [expenses, period, timeLimits])
+  }, [activeExpenses, period, timeLimits])
+
+  // Saldo total disponible en tiempo real (Siempre acumulativo / Histórico)
+  const globalBalance = useMemo(() => {
+    let cashUSD = 0
+    let bsTotal = 0
+    let digitalUSD = 0
+
+    activeSales.forEach((s: any) => {
+      const saleUSD = Number(s.totalUsd ?? s.totalUSD ?? s.total ?? 0)
+      const p = s.payments || {}
+      const efUSD = Number(p.efectivoUsd ?? 0)
+      const pMovil = Number(p.pagoMovil ?? 0)
+      const transf = Number(p.transferencia ?? 0)
+      const zelleUSD = Number(p.zelle ?? 0)
+      const binanceUSD = Number(p.binance ?? 0)
+
+      if ((efUSD + pMovil + transf + zelleUSD + binanceUSD) > 0) {
+        cashUSD += efUSD
+        bsTotal += (pMovil + transf)
+        digitalUSD += (zelleUSD + binanceUSD)
+      } else {
+        cashUSD += saleUSD
+      }
+    })
+
+    activeExpenses.forEach((e: any) => {
+      const expUSD = Number(e.amountUsd ?? e.amountUSD ?? e.amount ?? 0)
+      const expBS = Number(e.amountBs ?? e.amountBS ?? (expUSD * (e.rate || rateBCV)))
+      const method = String(e.method || e.paymentMethod || '').toLowerCase()
+
+      if (method.includes('pago') || method.includes('bs') || method.includes('punto') || method.includes('transf')) {
+        bsTotal -= expBS
+      } else if (method.includes('binance') || method.includes('zelle') || method.includes('usdt')) {
+        digitalUSD -= expUSD
+      } else {
+        cashUSD -= expUSD
+      }
+    })
+
+    const totalDisponibleUSD = cashUSD + (bsTotal / rateBCV) + digitalUSD
+    const totalDisponibleBs = totalDisponibleUSD * rateBCV
+
+    return {
+      cashUSD: Math.max(0, cashUSD),
+      bsTotal: Math.max(0, bsTotal),
+      digitalUSD: Math.max(0, digitalUSD),
+      totalDisponibleUSD: Math.max(0, totalDisponibleUSD),
+      totalDisponibleBs: Math.max(0, totalDisponibleBs)
+    }
+  }, [activeSales, activeExpenses, rateBCV])
+
+  // Métricas del período seleccionado
+  const periodMetrics = useMemo(() => {
+    let totalSalesUSD = 0
+    filteredSales.forEach((s: any) => {
+      totalSalesUSD += Number(s.totalUsd ?? s.totalUSD ?? s.total ?? 0)
+    })
+
+    let totalExpensesUSD = 0
+    filteredExpenses.forEach((e: any) => {
+      totalExpensesUSD += Number(e.amountUsd ?? e.amountUSD ?? e.amount ?? 0)
+    })
+
+    const totalInventoryValue = (products || []).reduce((acc: number, p: any) => {
+      const unitCost = landedCost ? landedCost(p) : Number(p.costPrice ?? p.cost ?? 0)
+      const stock = Number(p.stock ?? 0)
+      return acc + (unitCost * stock)
+    }, 0)
+
+    const gananciaNeta = totalSalesUSD - totalExpensesUSD
+
+    return {
+      totalSalesUSD,
+      totalExpensesUSD,
+      gananciaNeta,
+      totalInventoryValue,
+      salesCount: filteredSales.length
+    }
+  }, [filteredSales, filteredExpenses, products])
 
   // Abrir modal de confirmación con PIN
   const handleOpenPinModal = (exp: any) => {
@@ -170,7 +255,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
 
       const amount = Number(expenseToVoid.amountUsd ?? expenseToVoid.amountUSD ?? expenseToVoid.amount ?? 0)
 
-      // 1. Marcar como anulado
       await updateDoc(doc(db, 'expenses', expenseToVoid.id), {
         status: 'void',
         voidedAt: Date.now(),
@@ -178,7 +262,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         voidReason: 'Anulado con PIN de autorización',
       })
 
-      // 2. Registrar en auditoría
       await addDoc(collection(db, 'audit'), {
         type: 'void_expense',
         expenseId: expenseToVoid.id,
@@ -196,74 +279,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       setIsVerifying(false)
     }
   }
-
-  // Métricas
-  const metrics = useMemo(() => {
-    let totalSalesUSD = 0
-    let cashUSD = 0
-    let bsTotal = 0
-    let digitalUSD = 0
-
-    filteredSales.forEach((s: any) => {
-      const saleUSD = Number(s.totalUsd ?? s.totalUSD ?? s.total ?? 0)
-      totalSalesUSD += saleUSD
-
-      const p = s.payments || {}
-      const efUSD = Number(p.efectivoUsd ?? 0)
-      const pMovil = Number(p.pagoMovil ?? 0)
-      const transf = Number(p.transferencia ?? 0)
-      const zelleUSD = Number(p.zelle ?? 0)
-      const binanceUSD = Number(p.binance ?? 0)
-
-      if ((efUSD + pMovil + transf + zelleUSD + binanceUSD) > 0) {
-        cashUSD += efUSD
-        bsTotal += (pMovil + transf)
-        digitalUSD += (zelleUSD + binanceUSD)
-      } else {
-        cashUSD += saleUSD
-      }
-    })
-
-    let totalExpensesUSD = 0
-    filteredExpenses.forEach((e: any) => {
-      const expUSD = Number(e.amountUsd ?? e.amountUSD ?? e.amount ?? 0)
-      const expBS = Number(e.amountBs ?? e.amountBS ?? (expUSD * (e.rate || rateBCV)))
-      
-      totalExpensesUSD += expUSD
-
-      const method = String(e.method || e.paymentMethod || '').toLowerCase()
-      if (method.includes('pago') || method.includes('bs') || method.includes('punto') || method.includes('transf')) {
-        bsTotal -= expBS
-      } else if (method.includes('binance') || method.includes('zelle') || method.includes('usdt')) {
-        digitalUSD -= expUSD
-      } else {
-        cashUSD -= expUSD
-      }
-    })
-
-    const totalInventoryValue = (products || []).reduce((acc: number, p: any) => {
-      const unitCost = landedCost ? landedCost(p) : Number(p.costPrice ?? p.cost ?? 0)
-      const stock = Number(p.stock ?? 0)
-      return acc + (unitCost * stock)
-    }, 0)
-
-    const totalDisponibleUSD = cashUSD + (bsTotal / rateBCV) + digitalUSD
-    const totalDisponibleBs = totalDisponibleUSD * rateBCV
-    const gananciaNeta = totalSalesUSD - totalExpensesUSD
-
-    return {
-      totalSalesUSD,
-      totalExpensesUSD,
-      gananciaNeta,
-      cashUSD: Math.max(0, cashUSD),
-      bsTotal: Math.max(0, bsTotal),
-      digitalUSD: Math.max(0, digitalUSD),
-      totalDisponibleUSD: Math.max(0, totalDisponibleUSD),
-      totalDisponibleBs: Math.max(0, totalDisponibleBs),
-      totalInventoryValue,
-      salesCount: filteredSales.length
-    }
-  }, [filteredSales, filteredExpenses, products, rateBCV])
 
   return (
     <div className="flex flex-col gap-4 pb-28">
@@ -295,7 +310,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         ))}
       </div>
 
-      {/* TARJETA DESTACADA: DINERO DISPONIBLE + BOTÓN DE REGISTRAR GASTO PROMINENTE */}
+      {/* TARJETA DESTACADA: DINERO DISPONIBLE (GLOBAL FIJO) */}
       <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/30 via-card to-card p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -307,7 +322,6 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             </span>
           </div>
 
-          {/* BOTÓN REGISTRAR GASTO DESTACADO ARRIBA */}
           <button
             onClick={() => setShowExpenseModal(true)}
             className="flex items-center gap-1.5 rounded-full border border-rose-500/40 bg-rose-500/15 px-3 py-1 text-xs font-bold text-rose-400 shadow-sm transition-all hover:bg-rose-500/25 active:scale-95"
@@ -319,30 +333,30 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
 
         <div className="mt-3 flex flex-col">
           <span className="text-2xl font-bold tracking-tight text-foreground">
-            ${metrics.totalDisponibleUSD.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ${globalBalance.totalDisponibleUSD.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
           <span className="text-xs font-medium text-muted-foreground">
-            ≈ Bs {metrics.totalDisponibleBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ≈ Bs {globalBalance.totalDisponibleBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </div>
 
         <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border/40 pt-3 text-[11px]">
           <div>
             <p className="text-[10px] text-muted-foreground">Efectivo $</p>
-            <p className="font-semibold text-foreground">${metrics.cashUSD.toFixed(2)}</p>
+            <p className="font-semibold text-foreground">${globalBalance.cashUSD.toFixed(2)}</p>
           </div>
           <div>
             <p className="text-[10px] text-muted-foreground">Bs (Caja + Banco)</p>
-            <p className="font-semibold text-foreground">Bs {metrics.bsTotal.toLocaleString('es-VE')}</p>
+            <p className="font-semibold text-foreground">Bs {globalBalance.bsTotal.toLocaleString('es-VE')}</p>
           </div>
           <div>
             <p className="text-[10px] text-muted-foreground">USDT / Digital</p>
-            <p className="font-semibold text-foreground">${metrics.digitalUSD.toFixed(2)}</p>
+            <p className="font-semibold text-foreground">${globalBalance.digitalUSD.toFixed(2)}</p>
           </div>
         </div>
       </div>
 
-      {/* 4 TARJETAS DE MÉTRICAS */}
+      {/* 4 TARJETAS DE MÉTRICAS (RESPETAN EL FILTRO DE PERÍODO) */}
       <div className="grid grid-cols-2 gap-2.5">
         <div className="flex flex-col justify-between rounded-xl border border-border/60 bg-card p-3">
           <div className="flex items-center gap-1.5 text-muted-foreground">
@@ -350,15 +364,14 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-xs font-medium">Ventas Totales</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold text-foreground">${metrics.totalSalesUSD.toFixed(2)}</p>
+            <p className="text-lg font-bold text-foreground">${periodMetrics.totalSalesUSD.toFixed(2)}</p>
             <p className="text-[11px] text-muted-foreground">
-              Bs {(metrics.totalSalesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+              Bs {(periodMetrics.totalSalesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
-            <p className="mt-1 text-[10px] text-muted-foreground">{metrics.salesCount} ventas</p>
+            <p className="mt-1 text-[10px] text-muted-foreground">{periodMetrics.salesCount} ventas</p>
           </div>
         </div>
 
-        {/* Tarjeta de Gastos con opción rápida al hacer click */}
         <div 
           onClick={() => setShowExpenseModal(true)}
           className="flex cursor-pointer flex-col justify-between rounded-xl border border-border/60 bg-card p-3 transition-colors hover:border-rose-500/40"
@@ -371,9 +384,9 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-[10px] font-bold text-rose-400/80">+ Agregar</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold text-rose-400">${metrics.totalExpensesUSD.toFixed(2)}</p>
+            <p className="text-lg font-bold text-rose-400">${periodMetrics.totalExpensesUSD.toFixed(2)}</p>
             <p className="text-[11px] text-muted-foreground">
-              Bs {(metrics.totalExpensesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+              Bs {(periodMetrics.totalExpensesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
           </div>
         </div>
@@ -384,11 +397,11 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-xs font-medium text-muted-foreground">Ganancia Neta Real</span>
           </div>
           <div className="mt-2">
-            <p className={`text-lg font-bold ${metrics.gananciaNeta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              ${metrics.gananciaNeta.toFixed(2)}
+            <p className={`text-lg font-bold ${periodMetrics.gananciaNeta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              ${periodMetrics.gananciaNeta.toFixed(2)}
             </p>
             <p className="text-[11px] text-muted-foreground">
-              Bs {(metrics.gananciaNeta * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+              Bs {(periodMetrics.gananciaNeta * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
             <p className="mt-1 text-[10px] text-muted-foreground">Margen – gastos</p>
           </div>
@@ -400,16 +413,16 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-xs font-medium">Valor del Inventario</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold text-foreground">${metrics.totalInventoryValue.toFixed(2)}</p>
+            <p className="text-lg font-bold text-foreground">${periodMetrics.totalInventoryValue.toFixed(2)}</p>
             <p className="text-[11px] text-muted-foreground">
-              Bs {(metrics.totalInventoryValue * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+              Bs {(periodMetrics.totalInventoryValue * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
             <p className="mt-1 text-[10px] text-muted-foreground">A costo landed</p>
           </div>
         </div>
       </div>
 
-      {/* SECCIÓN: HISTORIAL DE GASTOS CON BOTÓN DE REGISTRAR EN EL HEADER */}
+      {/* SECCIÓN: HISTORIAL DE GASTOS */}
       <div className="mt-1 flex flex-col gap-2">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-1.5">
