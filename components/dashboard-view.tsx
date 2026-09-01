@@ -9,10 +9,10 @@ import {
   Package, 
   Plus, 
   Trash2, 
-  Calendar, 
-  ReceiptText, 
-  Shield, 
-  X 
+  Calendar,
+  ReceiptText,
+  Shield,
+  X
 } from 'lucide-react'
 import { doc, updateDoc, addDoc, collection } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
@@ -23,13 +23,11 @@ import { verifyPin } from '@/lib/store'
 import { ExpenseFormModal } from './expense-form-modal'
 
 export function DashboardView({ rate = 794.99 }: { rate?: number }) {
-  const session = useSession()
-  const activeUser = session?.activeUser || 'José'
-  
+  const { activeUser } = useSession()
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('today')
   const [showExpenseModal, setShowExpenseModal] = useState(false)
   
-  // Estado para el modal de PIN
+  // Estado para el modal de PIN nativo
   const [expenseToVoid, setExpenseToVoid] = useState<any | null>(null)
   const [pinDigits, setPinDigits] = useState(['', '', '', ''])
   const [pinError, setPinError] = useState('')
@@ -41,35 +39,28 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     useRef<HTMLInputElement>(null)
   ]
 
-  // Hooks protegidos contra retorno nulo
-  const salesHook = useSales()
-  const productsHook = useProducts()
-  const expensesHook = useExpenses()
-
-  const sales = Array.isArray(salesHook?.sales) ? salesHook.sales : (Array.isArray(salesHook) ? salesHook : [])
-  const products = Array.isArray(productsHook?.products) ? productsHook.products : (Array.isArray(productsHook) ? productsHook : [])
-  const expenses = Array.isArray(expensesHook?.expenses) ? expensesHook.expenses : (Array.isArray(expensesHook) ? expensesHook : [])
+  const { sales = [] } = useSales()
+  const { products = [] } = useProducts()
+  const { expenses = [] } = useExpenses()
 
   const rateBCV = typeof rate === 'number' && rate > 0 ? rate : 794.99
 
   // Helper de estado anulado
   const isVoided = (item: any): boolean => {
-    if (!item) return false
     return Boolean(
-      item.status === 'void' ||
-      item.status === 'voided' ||
-      item.status === 'cancelled' ||
-      item.status === 'anulada' ||
-      item.status === 'anulado' ||
-      item.voided === true ||
-      item.anulado === true
+      item?.status === 'void' ||
+      item?.status === 'voided' ||
+      item?.status === 'cancelled' ||
+      item?.status === 'anulada' ||
+      item?.status === 'anulado' ||
+      item?.voided === true ||
+      item?.anulado === true
     )
   }
 
   // Helper universal de timestamp
   const getMillis = (item: any): number => {
-    if (!item) return Date.now()
-    const raw = item.createdAt ?? item.timestamp ?? item.date ?? item.fecha
+    const raw = item?.createdAt ?? item?.timestamp ?? item?.date ?? item?.fecha
     if (typeof raw === 'number') return raw
     if (typeof raw?.toMillis === 'function') return raw.toMillis()
     if (typeof raw?.toDate === 'function') return raw.toDate().getTime()
@@ -86,129 +77,35 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     return { startOfToday, startOfWeek, startOfMonth }
   }, [])
 
-  // Ventas no anuladas (Globales)
-  const activeSales = useMemo(() => {
-    return sales.filter((s: any) => !isVoided(s))
-  }, [sales])
-
-  // Gastos no anulados (Globales)
-  const activeExpenses = useMemo(() => {
-    return expenses.filter((e: any) => !isVoided(e))
-  }, [expenses])
-
-  // Ventas filtradas por período
+  // Ventas filtradas por el selector de fechas
   const filteredSales = useMemo(() => {
-    return activeSales.filter((s: any) => {
+    return (sales || []).filter((s: any) => {
+      if (isVoided(s)) return false
       if (period === 'all') return true
+
       const ms = getMillis(s)
       if (period === 'today') return ms >= timeLimits.startOfToday
       if (period === 'week') return ms >= timeLimits.startOfWeek
       if (period === 'month') return ms >= timeLimits.startOfMonth
       return true
     })
-  }, [activeSales, period, timeLimits])
+  }, [sales, period, timeLimits])
 
-  // Gastos filtrados por período
+  // Gastos filtrados por el selector de fechas
   const filteredExpenses = useMemo(() => {
-    return activeExpenses.filter((e: any) => {
+    return (expenses || []).filter((e: any) => {
+      if (isVoided(e)) return false
       if (period === 'all') return true
+
       const ms = getMillis(e)
       if (period === 'today') return ms >= timeLimits.startOfToday
       if (period === 'week') return ms >= timeLimits.startOfWeek
       if (period === 'month') return ms >= timeLimits.startOfMonth
       return true
     })
-  }, [activeExpenses, period, timeLimits])
+  }, [expenses, period, timeLimits])
 
-  // Saldo total disponible en tiempo real (Siempre acumulativo / Histórico)
-  const globalBalance = useMemo(() => {
-    let cashUSD = 0
-    let bsTotal = 0
-    let digitalUSD = 0
-
-    activeSales.forEach((s: any) => {
-      const saleUSD = Number(s?.totalUsd ?? s?.totalUSD ?? s?.total ?? 0) || 0
-      const p = s?.payments || {}
-      const efUSD = Number(p.efectivoUsd ?? 0) || 0
-      const pMovil = Number(p.pagoMovil ?? 0) || 0
-      const transf = Number(p.transferencia ?? 0) || 0
-      const zelleUSD = Number(p.zelle ?? 0) || 0
-      const binanceUSD = Number(p.binance ?? 0) || 0
-
-      if ((efUSD + pMovil + transf + zelleUSD + binanceUSD) > 0) {
-        cashUSD += efUSD
-        bsTotal += (pMovil + transf)
-        digitalUSD += (zelleUSD + binanceUSD)
-      } else {
-        cashUSD += saleUSD
-      }
-    })
-
-    activeExpenses.forEach((e: any) => {
-      const expUSD = Number(e?.amountUsd ?? e?.amountUSD ?? e?.amount ?? 0) || 0
-      const expBS = Number(e?.amountBs ?? e?.amountBS ?? (expUSD * (e?.rate || rateBCV))) || 0
-      const method = String(e?.method || e?.paymentMethod || '').toLowerCase()
-
-      if (method.includes('pago') || method.includes('bs') || method.includes('punto') || method.includes('transf')) {
-        bsTotal -= expBS
-      } else if (method.includes('binance') || method.includes('zelle') || method.includes('usdt')) {
-        digitalUSD -= expUSD
-      } else {
-        cashUSD -= expUSD
-      }
-    })
-
-    const totalDisponibleUSD = cashUSD + (bsTotal / (rateBCV || 1)) + digitalUSD
-    const totalDisponibleBs = totalDisponibleUSD * rateBCV
-
-    return {
-      cashUSD: Math.max(0, cashUSD),
-      bsTotal: Math.max(0, bsTotal),
-      digitalUSD: Math.max(0, digitalUSD),
-      totalDisponibleUSD: Math.max(0, totalDisponibleUSD),
-      totalDisponibleBs: Math.max(0, totalDisponibleBs)
-    }
-  }, [activeSales, activeExpenses, rateBCV])
-
-  // Métricas del período seleccionado
-  const periodMetrics = useMemo(() => {
-    let totalSalesUSD = 0
-    filteredSales.forEach((s: any) => {
-      totalSalesUSD += Number(s?.totalUsd ?? s?.totalUSD ?? s?.total ?? 0) || 0
-    })
-
-    let totalExpensesUSD = 0
-    filteredExpenses.forEach((e: any) => {
-      totalExpensesUSD += Number(e?.amountUsd ?? e?.amountUSD ?? e?.amount ?? 0) || 0
-    })
-
-    const totalInventoryValue = products.reduce((acc: number, p: any) => {
-      let unitCost = 0
-      try {
-        if (typeof landedCost === 'function') {
-          unitCost = Number(landedCost(p)) || 0
-        } else {
-          unitCost = Number(p?.costPrice ?? p?.cost ?? 0) || 0
-        }
-      } catch {
-        unitCost = Number(p?.costPrice ?? p?.cost ?? 0) || 0
-      }
-      const stock = Number(p?.stock ?? 0) || 0
-      return acc + (unitCost * stock)
-    }, 0)
-
-    const gananciaNeta = totalSalesUSD - totalExpensesUSD
-
-    return {
-      totalSalesUSD,
-      totalExpensesUSD,
-      gananciaNeta,
-      totalInventoryValue,
-      salesCount: filteredSales.length
-    }
-  }, [filteredSales, filteredExpenses, products])
-
-  // Manejo de PIN
+  // Abrir modal de confirmación con PIN
   const handleOpenPinModal = (exp: any) => {
     setExpenseToVoid(exp)
     setPinDigits(['', '', '', ''])
@@ -218,12 +115,14 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     }, 100)
   }
 
+  // Cerrar modal de PIN
   const handleClosePinModal = () => {
     setExpenseToVoid(null)
     setPinDigits(['', '', '', ''])
     setPinError('')
   }
 
+  // Manejo de inputs del PIN de 4 dígitos
   const handleDigitChange = (index: number, val: string) => {
     const digit = val.slice(-1)
     if (!/^\d*$/.test(digit)) return
@@ -244,6 +143,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
     }
   }
 
+  // Confirmar y procesar anulación de gasto con PIN
   const handleConfirmVoid = async () => {
     const fullPin = pinDigits.join('')
     if (fullPin.length < 4) {
@@ -268,7 +168,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         return
       }
 
-      const amount = Number(expenseToVoid.amountUsd ?? expenseToVoid.amountUSD ?? expenseToVoid.amount ?? 0) || 0
+      const amount = Number(expenseToVoid.amountUsd ?? expenseToVoid.amountUSD ?? expenseToVoid.amount ?? 0)
 
       await updateDoc(doc(db, 'expenses', expenseToVoid.id), {
         status: 'void',
@@ -294,6 +194,82 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
       setIsVerifying(false)
     }
   }
+
+  // Métricas
+  const metrics = useMemo(() => {
+    // 1. Totales según período seleccionado
+    let totalSalesUSD = 0
+    filteredSales.forEach((s: any) => {
+      totalSalesUSD += Number(s.totalUsd ?? s.totalUSD ?? s.total ?? 0)
+    })
+
+    let totalExpensesUSD = 0
+    filteredExpenses.forEach((e: any) => {
+      totalExpensesUSD += Number(e.amountUsd ?? e.amountUSD ?? e.amount ?? 0)
+    })
+
+    // 2. Saldo actual disponible (Global: todas las ventas activas menos todos los gastos activos)
+    let cashUSD = 0
+    let bsTotal = 0
+    let digitalUSD = 0
+
+    ;(sales || []).forEach((s: any) => {
+      if (isVoided(s)) return
+      const saleUSD = Number(s.totalUsd ?? s.totalUSD ?? s.total ?? 0)
+      const p = s.payments || {}
+      const efUSD = Number(p.efectivoUsd ?? 0)
+      const pMovil = Number(p.pagoMovil ?? 0)
+      const transf = Number(p.transferencia ?? 0)
+      const zelleUSD = Number(p.zelle ?? 0)
+      const binanceUSD = Number(p.binance ?? 0)
+
+      if ((efUSD + pMovil + transf + zelleUSD + binanceUSD) > 0) {
+        cashUSD += efUSD
+        bsTotal += (pMovil + transf)
+        digitalUSD += (zelleUSD + binanceUSD)
+      } else {
+        cashUSD += saleUSD
+      }
+    })
+
+    ;(expenses || []).forEach((e: any) => {
+      if (isVoided(e)) return
+      const expUSD = Number(e.amountUsd ?? e.amountUSD ?? e.amount ?? 0)
+      const expBS = Number(e.amountBs ?? e.amountBS ?? (expUSD * (e.rate || rateBCV)))
+
+      const method = String(e.method || e.paymentMethod || '').toLowerCase()
+      if (method.includes('pago') || method.includes('bs') || method.includes('punto') || method.includes('transf')) {
+        bsTotal -= expBS
+      } else if (method.includes('binance') || method.includes('zelle') || method.includes('usdt')) {
+        digitalUSD -= expUSD
+      } else {
+        cashUSD -= expUSD
+      }
+    })
+
+    const totalInventoryValue = (products || []).reduce((acc: number, p: any) => {
+      const unitCost = landedCost ? landedCost(p) : Number(p.costPrice ?? p.cost ?? 0)
+      const stock = Number(p.stock ?? 0)
+      return acc + (unitCost * stock)
+    }, 0)
+
+    const totalDisponibleUSD = cashUSD + (bsTotal / rateBCV) + digitalUSD
+    const totalDisponibleBs = totalDisponibleUSD * rateBCV
+    const gananciaNeta = totalSalesUSD - totalExpensesUSD
+
+    return {
+      totalSalesUSD,
+      totalExpensesUSD,
+      gananciaNeta,
+      cashUSD: Math.max(0, cashUSD),
+      bsTotal: Math.max(0, bsTotal),
+      digitalUSD: Math.max(0, digitalUSD),
+      totalDisponibleUSD: Math.max(0, totalDisponibleUSD),
+      totalDisponibleBs: Math.max(0, totalDisponibleBs),
+      totalInventoryValue,
+      salesCount: filteredSales.length
+    }
+  }, [sales, expenses, filteredSales, filteredExpenses, products, rateBCV])
 
   return (
     <div className="flex flex-col gap-4 pb-28">
@@ -348,25 +324,25 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
 
         <div className="mt-3 flex flex-col">
           <span className="text-2xl font-bold tracking-tight text-foreground">
-            ${(globalBalance.totalDisponibleUSD || 0).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ${metrics.totalDisponibleUSD.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
           <span className="text-xs font-medium text-muted-foreground">
-            ≈ Bs {(globalBalance.totalDisponibleBs || 0).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ≈ Bs {metrics.totalDisponibleBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </div>
 
         <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border/40 pt-3 text-[11px]">
           <div>
             <p className="text-[10px] text-muted-foreground">Efectivo $</p>
-            <p className="font-semibold text-foreground">${(globalBalance.cashUSD || 0).toFixed(2)}</p>
+            <p className="font-semibold text-foreground">${metrics.cashUSD.toFixed(2)}</p>
           </div>
           <div>
             <p className="text-[10px] text-muted-foreground">Bs (Caja + Banco)</p>
-            <p className="font-semibold text-foreground">Bs {(globalBalance.bsTotal || 0).toLocaleString('es-VE')}</p>
+            <p className="font-semibold text-foreground">Bs {metrics.bsTotal.toLocaleString('es-VE')}</p>
           </div>
           <div>
             <p className="text-[10px] text-muted-foreground">USDT / Digital</p>
-            <p className="font-semibold text-foreground">${(globalBalance.digitalUSD || 0).toFixed(2)}</p>
+            <p className="font-semibold text-foreground">${metrics.digitalUSD.toFixed(2)}</p>
           </div>
         </div>
       </div>
@@ -379,11 +355,11 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-xs font-medium">Ventas Totales</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold text-foreground">${(periodMetrics.totalSalesUSD || 0).toFixed(2)}</p>
+            <p className="text-lg font-bold text-foreground">${metrics.totalSalesUSD.toFixed(2)}</p>
             <p className="text-[11px] text-muted-foreground">
-              Bs {((periodMetrics.totalSalesUSD || 0) * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+              Bs {(metrics.totalSalesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
-            <p className="mt-1 text-[10px] text-muted-foreground">{periodMetrics.salesCount} ventas</p>
+            <p className="mt-1 text-[10px] text-muted-foreground">{metrics.salesCount} ventas</p>
           </div>
         </div>
 
@@ -399,9 +375,9 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-[10px] font-bold text-rose-400/80">+ Agregar</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold text-rose-400">${(periodMetrics.totalExpensesUSD || 0).toFixed(2)}</p>
+            <p className="text-lg font-bold text-rose-400">${metrics.totalExpensesUSD.toFixed(2)}</p>
             <p className="text-[11px] text-muted-foreground">
-              Bs {((periodMetrics.totalExpensesUSD || 0) * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+              Bs {(metrics.totalExpensesUSD * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
           </div>
         </div>
@@ -412,11 +388,11 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-xs font-medium text-muted-foreground">Ganancia Neta Real</span>
           </div>
           <div className="mt-2">
-            <p className={`text-lg font-bold ${periodMetrics.gananciaNeta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              ${(periodMetrics.gananciaNeta || 0).toFixed(2)}
+            <p className={`text-lg font-bold ${metrics.gananciaNeta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              ${metrics.gananciaNeta.toFixed(2)}
             </p>
             <p className="text-[11px] text-muted-foreground">
-              Bs {((periodMetrics.gananciaNeta || 0) * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+              Bs {(metrics.gananciaNeta * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
             <p className="mt-1 text-[10px] text-muted-foreground">Margen – gastos</p>
           </div>
@@ -428,9 +404,9 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
             <span className="text-xs font-medium">Valor del Inventario</span>
           </div>
           <div className="mt-2">
-            <p className="text-lg font-bold text-foreground">${(periodMetrics.totalInventoryValue || 0).toFixed(2)}</p>
+            <p className="text-lg font-bold text-foreground">${metrics.totalInventoryValue.toFixed(2)}</p>
             <p className="text-[11px] text-muted-foreground">
-              Bs {((periodMetrics.totalInventoryValue || 0) * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+              Bs {(metrics.totalInventoryValue * rateBCV).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
             </p>
             <p className="mt-1 text-[10px] text-muted-foreground">A costo landed</p>
           </div>
@@ -462,7 +438,7 @@ export function DashboardView({ rate = 794.99 }: { rate?: number }) {
         ) : (
           <div className="flex flex-col gap-2">
             {filteredExpenses.map((exp: any) => {
-              const expUSD = Number(exp?.amountUsd ?? exp?.amountUSD ?? exp?.amount ?? 0) || 0
+              const expUSD = Number(exp.amountUsd ?? exp.amountUSD ?? exp.amount ?? 0)
               const expDate = new Date(getMillis(exp))
               const formattedDate = expDate.toLocaleDateString('es-VE', {
                 day: '2-digit',
